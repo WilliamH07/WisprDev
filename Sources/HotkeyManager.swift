@@ -1,6 +1,8 @@
 import Cocoa
+import os
 
 final class HotkeyManager {
+    private let recordingLog = OSLog(subsystem: "com.williamh07.wisper", category: "Recording")
     private let backend = GlobalShortcutBackend()
     private var configuration = ShortcutConfiguration(
         hold: .defaultHold,
@@ -17,6 +19,15 @@ final class HotkeyManager {
 
     var hasPressedShortcutInputs: Bool {
         inputState.hasPressedShortcutInputs(configuration: configuration)
+    }
+
+    var isRunning: Bool {
+        backend.isRunning
+    }
+
+    func updateConfiguration(_ configuration: ShortcutConfiguration) {
+        self.configuration = configuration
+        inputState = ShortcutInputState()
     }
 
     func start(configuration: ShortcutConfiguration) throws {
@@ -57,6 +68,7 @@ final class HotkeyManager {
         )
         inputState = result.state
         for event in result.emittedEvents {
+            os_log(.info, log: recordingLog, "HotkeyManager emitted event: %{public}@", String(describing: event))
             onShortcutEvent?(event)
         }
         return result.consumeDecision

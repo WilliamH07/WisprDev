@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 enum AppSettingsStorage {
-    private static let bundleID = Bundle.main.bundleIdentifier ?? "com.zachlatta.freeflow"
+    private static let bundleID = Bundle.main.bundleIdentifier ?? "com.williamh07.wisper"
 
     private static var storageDirectory: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -10,6 +10,17 @@ enum AppSettingsStorage {
         let dir = appSupport.appendingPathComponent(appName, isDirectory: true)
         if !FileManager.default.fileExists(atPath: dir.path) {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            // Migrate legacy settings file from FreeFlow if present
+            let legacyNames = ["FreeFlow Dev", "FreeFlow"]
+            for legacy in legacyNames {
+                let legacyDir = appSupport.appendingPathComponent(legacy, isDirectory: true)
+                let legacyFile = legacyDir.appendingPathComponent(".settings")
+                let newFile = dir.appendingPathComponent(".settings")
+                if FileManager.default.fileExists(atPath: legacyFile.path) && !FileManager.default.fileExists(atPath: newFile.path) {
+                    try? FileManager.default.copyItem(at: legacyFile, to: newFile)
+                    break
+                }
+            }
         }
         return dir
     }

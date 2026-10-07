@@ -46,6 +46,34 @@ struct MenuBarView: View {
         NotificationCenter.default.post(name: .showSettings, object: nil)
     }
 
+    private func memoryIcon(for category: SemanticMemoryCategory) -> String {
+        switch category {
+        case .clipboard: return "📋"
+        case .dictation: return "🎙️"
+        case .rewrite: return "✨"
+        case .terminal: return "💻"
+        case .manualNote: return "📝"
+        }
+    }
+
+    private func addManualMemoryNote() {
+        let alert = NSAlert()
+        alert.messageText = "Ajouter une note à la mémoire"
+        alert.informativeText = "Cette note sera conservée localement et retrouvable par recherche vocale et par l'Assistant IA."
+        alert.alertStyle = .informational
+
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 60))
+        input.placeholderString = "Ex. : commande de déploiement du projet X…"
+        alert.accessoryView = input
+
+        alert.addButton(withTitle: "Ajouter")
+        alert.addButton(withTitle: "Annuler")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            SemanticMemoryService.shared.addManualNote(input.stringValue)
+        }
+    }
+
     var body: some View {
         VStack(spacing: 4) {
             Text("\(AppName.displayName) v\(appVersion)")
@@ -138,6 +166,18 @@ struct MenuBarView: View {
 
             Divider()
 
+            Button("Mode Assistant IA  (Double-appui \(appState.rewriteSelectionShortcut.isDisabled ? "Option" : appState.rewriteSelectionShortcut.displayName))") {
+                AIAssistantWindowManager.shared.toggle(appState: appState)
+            }
+
+            if !appState.isRecording && !appState.isTranscribing && !appState.isRewritingText {
+                Button(appState.rewriteSelectionShortcut.isDisabled
+                    ? "Rewrite Selected Text"
+                    : "Rewrite Selected Text  (\(appState.rewriteSelectionShortcut.displayName))") {
+                    appState.triggerRewriteSelectedText()
+                }
+            }
+
             if !appState.lastTranscript.isEmpty && !appState.isRecording && !appState.isTranscribing {
                 Button(appState.copyAgainShortcut.isDisabled
                     ? "Paste Again"
@@ -175,6 +215,37 @@ struct MenuBarView: View {
 
                 Button("Open Run Log") {
                     openRunLog()
+                }
+            }
+
+            Menu("🧠 Mémoire (« Deuxième Cerveau »)") {
+                let memories = SemanticMemoryStore.shared.fetchRecent(limit: 6)
+                if memories.isEmpty {
+                    Text("Aucun souvenir mémorisé")
+                } else {
+                    ForEach(memories) { item in
+                        Button {
+                            copyTranscriptToPasteboard(item.text)
+                        } label: {
+                            let icon = memoryIcon(for: item.category)
+                            let app = item.sourceAppName.isEmpty ? "" : "[\(item.sourceAppName)] "
+                            Text("\(icon) \(app)\(item.snippet)")
+                        }
+                    }
+                    Divider()
+                }
+
+                Button("Ajouter une Note à la Mémoire...") {
+                    addManualMemoryNote()
+                }
+
+                Button("Ouvrir l'Assistant IA avec Mémoire") {
+                    AIAssistantWindowManager.shared.toggle(appState: appState)
+                }
+
+                Button("Gérer la Mémoire...") {
+                    appState.selectedSettingsTab = .ai
+                    NotificationCenter.default.post(name: .showSettings, object: nil)
                 }
             }
 
@@ -227,7 +298,7 @@ struct MenuBarView: View {
 
                 Divider()
                 Button("Customize…") {
-                    appState.selectedSettingsTab = .general
+                    appState.selectedSettingsTab = .shortcuts
                     NotificationCenter.default.post(name: .showSettings, object: nil)
                 }
             }
@@ -271,7 +342,7 @@ struct MenuBarView: View {
 
                 Divider()
                 Button("Customize…") {
-                    appState.selectedSettingsTab = .general
+                    appState.selectedSettingsTab = .shortcuts
                     NotificationCenter.default.post(name: .showSettings, object: nil)
                 }
             }
@@ -315,7 +386,45 @@ struct MenuBarView: View {
 
                 Divider()
                 Button("Customize…") {
-                    appState.selectedSettingsTab = .general
+                    appState.selectedSettingsTab = .shortcuts
+                    NotificationCenter.default.post(name: .showSettings, object: nil)
+                }
+            }
+
+            Menu("Rewrite Shortcut") {
+                Button {
+                    _ = appState.setShortcut(.disabled, for: .rewriteSelection)
+                } label: {
+                    if appState.rewriteSelectionShortcut.isDisabled {
+                        Text("✓ Disabled")
+                    } else {
+                        Text("  Disabled")
+                    }
+                }
+
+                if let savedCustomShortcut = appState.savedCustomShortcut(for: .rewriteSelection) {
+                    Divider()
+                    Button {
+                        _ = appState.setShortcut(savedCustomShortcut, for: .rewriteSelection)
+                    } label: {
+                        if appState.rewriteSelectionShortcut == savedCustomShortcut {
+                            Text("✓ Custom: \(savedCustomShortcut.displayName)")
+                        } else {
+                            Text("  Custom: \(savedCustomShortcut.displayName)")
+                        }
+                    }
+                } else if !appState.rewriteSelectionShortcut.isDisabled {
+                    Divider()
+                    Button {
+                        _ = appState.setShortcut(appState.rewriteSelectionShortcut, for: .rewriteSelection)
+                    } label: {
+                        Text("✓ \(appState.rewriteSelectionShortcut.displayName)")
+                    }
+                }
+
+                Divider()
+                Button("Customize…") {
+                    appState.selectedSettingsTab = .shortcuts
                     NotificationCenter.default.post(name: .showSettings, object: nil)
                 }
             }

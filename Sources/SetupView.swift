@@ -54,7 +54,7 @@ struct SetupView: View {
     var onComplete: () -> Void
     @EnvironmentObject var appState: AppState
     @Environment(\.openURL) private var openURL
-    private let freeflowRepoURL = URL(string: "https://github.com/zachlatta/freeflow")!
+    private let wisperRepoURL = URL(string: "https://github.com/WilliamH07/Wisper")!
     private enum SetupStep: Int, CaseIterable {
         case welcome = 0
         case apiKey
@@ -66,6 +66,7 @@ struct SetupView: View {
         case copyAgainShortcut
         case commandMode
         case vocabulary
+        case semanticMemory
         case launchAtLogin
         case overlayStyle
         case testTranscription
@@ -106,6 +107,9 @@ struct SetupView: View {
     @State private var isCapturingCopyAgainShortcut = false
     @StateObject private var testHotkeyHarness = SetupTestHotkeyHarness()
     @AppStorage("use_compact_overlay") private var useCompactOverlay = true
+    @AppStorage("semantic_memory_enabled") private var setupSemanticMemoryEnabled = true
+    @AppStorage("semantic_memory_capture_clipboard") private var setupCaptureClipboard = false
+    @AppStorage("semantic_memory_capture_terminal") private var setupCaptureTerminal = false
 
     private let totalSteps: [SetupStep] = SetupStep.allCases
     private var isCapturingShortcut: Bool {
@@ -129,7 +133,7 @@ struct SetupView: View {
                         if currentStep != .welcome {
                             Button("Back") {
                                 keyValidationError = nil
-                                withAnimation {
+                                withAnimation(WisperMotion.stateChange) {
                                     currentStep = previousStep(currentStep)
                                 }
                             }
@@ -156,7 +160,7 @@ struct SetupView: View {
                                 HStack(spacing: 10) {
                                     Button("Skip") {
                                         stopTestHotkeyMonitoring()
-                                        withAnimation {
+                                        withAnimation(WisperMotion.stateChange) {
                                             currentStep = nextStep(currentStep)
                                         }
                                     }
@@ -165,7 +169,7 @@ struct SetupView: View {
 
                                     Button("Continue") {
                                         stopTestHotkeyMonitoring()
-                                        withAnimation {
+                                        withAnimation(WisperMotion.stateChange) {
                                             currentStep = nextStep(currentStep)
                                         }
                                     }
@@ -174,7 +178,7 @@ struct SetupView: View {
                                 }
                             } else {
                                 Button("Continue") {
-                                    withAnimation {
+                                    withAnimation(WisperMotion.stateChange) {
                                         currentStep = nextStep(currentStep)
                                     }
                                 }
@@ -251,6 +255,8 @@ struct SetupView: View {
             commandModeStep
         case .vocabulary:
             vocabularyStep
+        case .semanticMemory:
+            semanticMemoryStep
         case .overlayStyle:
             overlayStyleStep
         case .launchAtLogin:
@@ -283,7 +289,7 @@ struct SetupView: View {
 
             VStack(spacing: 10) {
                 HStack(spacing: 8) {
-                    AsyncImage(url: URL(string: "https://avatars.githubusercontent.com/u/992248")) { phase in
+                    AsyncImage(url: URL(string: "https://github.com/WilliamH07.png")) { phase in
                         switch phase {
                         case .success(let image):
                             image.resizable().aspectRatio(contentMode: .fill)
@@ -295,9 +301,9 @@ struct SetupView: View {
                     .clipShape(Circle())
 
                     Button {
-                        openURL(freeflowRepoURL)
+                        openURL(wisperRepoURL)
                     } label: {
-                        Text("zachlatta/freeflow")
+                        Text("WilliamH07/Wisper")
                             .font(.system(.caption, design: .monospaced).weight(.medium))
                     }
                     .buttonStyle(.plain)
@@ -322,7 +328,7 @@ struct SetupView: View {
                     .background(Capsule().fill(Color.yellow.opacity(0.14)))
 
                     Button {
-                        openURL(freeflowRepoURL)
+                        openURL(wisperRepoURL)
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "star")
@@ -419,8 +425,42 @@ struct SetupView: View {
                             .fill(Color.blue.opacity(0.06))
                     )
 
+                    Button {
+                        apiKeyInput = "local"
+                        apiBaseURLInput = LocalInferenceService.defaultOllamaBaseURL
+                        appState.transcriptionModel = "whisper-local"
+                        appState.postProcessingModel = "llama3.2:3b"
+                        validateAndContinue()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "cpu.fill")
+                                .foregroundStyle(.blue)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Activer le Mode 100% Local (Mac M4)")
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.primary)
+                                Text("Whisper Metal + Llama 3.2 3B en local (Aucune clé requise)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.right.circle.fill")
+                                .foregroundStyle(.blue)
+                        }
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.green.opacity(0.12))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.green.opacity(0.4), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("API Key")
+                        Text("Ou clé API OpenAI / Groq (optionnel)")
                             .font(.headline)
                         SecureField("Paste your API key", text: $apiKeyInput)
                             .textFieldStyle(.roundedBorder)
@@ -500,9 +540,9 @@ struct SetupView: View {
                 Spacer()
                 if micPermissionGranted {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(WisperPalette.success)
                     Text("Granted")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(WisperPalette.success)
                 } else {
                     Button("Grant Access") {
                         requestMicPermission()
@@ -539,9 +579,9 @@ struct SetupView: View {
                 Spacer()
                 if accessibilityGranted {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(WisperPalette.success)
                     Text("Granted")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(WisperPalette.success)
                 } else {
                     Button("Open Settings") {
                         requestAccessibility()
@@ -590,9 +630,9 @@ struct SetupView: View {
                 Spacer()
                 if appState.hasScreenRecordingPermission {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(WisperPalette.success)
                     Text("Granted")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(WisperPalette.success)
                 } else {
                     Button("Grant Access") {
                         appState.requestScreenCapturePermission()
@@ -751,6 +791,41 @@ struct SetupView: View {
                     .foregroundStyle(.secondary)
             }
 
+        }
+    }
+
+    var semanticMemoryStep: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "brain.head.profile")
+                .font(.system(size: 60))
+                .foregroundStyle(.blue)
+
+            Text("Local Semantic Memory")
+                .font(.title)
+                .fontWeight(.bold)
+
+            Text("Wisper can remember your dictations and rewrites locally so the AI Assistant and voice search (\"Wisper, find...\") can resurface them later. Everything stays in a local database on this Mac — nothing is sent anywhere. Clipboard and Terminal history capture are off by default.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("Remember my dictations and rewrites", isOn: $setupSemanticMemoryEnabled)
+
+                Toggle("Also capture text I copy (clipboard)", isOn: $setupCaptureClipboard)
+                    .disabled(!setupSemanticMemoryEnabled)
+
+                Text("Password managers and private keys are always excluded.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Also index my Terminal history (~/.zsh_history)", isOn: $setupCaptureTerminal)
+                    .disabled(!setupSemanticMemoryEnabled)
+
+                Text("Read-only access to your local shell history. Passwords and tokens are strictly filtered.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -943,13 +1018,13 @@ struct SetupView: View {
                     VStack(spacing: 20) {
                         ZStack {
                             Circle()
-                                .fill(Color.blue.opacity(0.65))
+                                .fill(WisperPalette.recording.opacity(0.65))
                                 .frame(width: 100, height: 100)
 
                             Circle()
-                                .stroke(Color.blue.opacity(0.8), lineWidth: 3)
+                                .stroke(WisperPalette.recording.opacity(0.8), lineWidth: 3)
                                 .frame(width: 100, height: 100)
-                                .shadow(color: .blue.opacity(0.5), radius: 10)
+                                .shadow(color: WisperPalette.recording.opacity(0.5), radius: 10)
 
                             WaveformView(audioLevel: testAudioLevel)
                         }
@@ -957,7 +1032,7 @@ struct SetupView: View {
                         Text("Listening...")
                             .font(.title2)
                             .fontWeight(.semibold)
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(WisperPalette.recording)
                     }
 
                 case .transcribing:
@@ -972,9 +1047,9 @@ struct SetupView: View {
 
                 case .done:
                     VStack(spacing: 16) {
-                        Image(systemName: "checkmark.circle.fill")
+                        Image(systemName: testError != nil ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
                             .font(.system(size: 60))
-                            .foregroundStyle(.green)
+                            .foregroundStyle(testError != nil ? WisperPalette.error : WisperPalette.success)
 
                         if let error = testError {
                             Text("Something went wrong")
@@ -1037,7 +1112,7 @@ struct SetupView: View {
         VStack(spacing: 20) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 60))
-                .foregroundStyle(.green)
+                .foregroundStyle(WisperPalette.success)
 
             Text("You're All Set!")
                 .font(.title)
@@ -1079,7 +1154,7 @@ struct SetupView: View {
         HStack(spacing: 8) {
             ForEach(totalSteps, id: \.rawValue) { step in
                 Circle()
-                    .fill(step == currentStep ? Color.blue : Color.gray.opacity(0.3))
+                    .fill(step == currentStep ? WisperPalette.processing : Color.gray.opacity(0.3))
                     .frame(width: 8, height: 8)
             }
         }
@@ -1147,7 +1222,7 @@ struct SetupView: View {
                 isValidatingKey = false
                 if valid {
                     appState.apiKey = key
-                    withAnimation {
+                    withAnimation(WisperMotion.stateChange) {
                         currentStep = nextStep(currentStep)
                     }
                 } else {
@@ -1159,7 +1234,7 @@ struct SetupView: View {
 
     func saveCustomVocabularyAndContinue() {
         appState.customVocabulary = customVocabularyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        withAnimation {
+        withAnimation(WisperMotion.stateChange) {
             currentStep = nextStep(currentStep)
         }
     }
@@ -1236,7 +1311,7 @@ struct SetupView: View {
                             testHotkeyHarness.isTranscribing = false
                             testAudioRecorder = nil
                             testError = error.localizedDescription
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                            withAnimation(WisperMotion.momentum) {
                                 testPhase = .done
                             }
                             recorder.cleanup()
@@ -1250,13 +1325,13 @@ struct SetupView: View {
                         .sink { level in
                             testAudioLevel = level
                         }
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    withAnimation(WisperMotion.momentum) {
                         testPhase = .recording
                     }
                 } catch {
                     testHotkeyHarness.resetSession()
                     testError = error.localizedDescription
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    withAnimation(WisperMotion.momentum) {
                         testPhase = .done
                     }
                 }
@@ -1268,7 +1343,7 @@ struct SetupView: View {
                 testAudioLevel = 0.0
                 testHotkeyHarness.isTranscribing = true
 
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                withAnimation(WisperMotion.momentum) {
                     testPhase = .transcribing
                 }
                 recorder.stopRecording { url in
@@ -1279,7 +1354,7 @@ struct SetupView: View {
                             if testError == nil {
                                 testError = "No audio file was created."
                             }
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                            withAnimation(WisperMotion.momentum) {
                                 testPhase = .done
                             }
                             recorder.cleanup()
@@ -1295,7 +1370,7 @@ struct SetupView: View {
                                 testHotkeyHarness.isTranscribing = false
                                 testAudioRecorder = nil
                                 testTranscript = transcript
-                                withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                                withAnimation(WisperMotion.momentum) {
                                     testPhase = .done
                                 }
                             }
@@ -1304,7 +1379,7 @@ struct SetupView: View {
                                 testHotkeyHarness.isTranscribing = false
                                 testAudioRecorder = nil
                                 testError = error.localizedDescription
-                                withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                                withAnimation(WisperMotion.momentum) {
                                     testPhase = .done
                                 }
                             }
@@ -1426,7 +1501,7 @@ class GitHubMetadataCache: ObservableObject {
 
     private var lastFetchDate: Date?
     private let cacheDuration: TimeInterval = 5 * 60 // 5 minutes
-    private let repoAPIURL = URL(string: "https://api.github.com/repos/zachlatta/freeflow")!
+    private let repoAPIURL = URL(string: "https://api.github.com/repos/WilliamH07/Wisper")!
 
     private init() {}
 
@@ -1449,7 +1524,7 @@ class GitHubMetadataCache: ObservableObject {
             if count > 0 {
                 let perPage = 100
                 let lastPage = max(1, Int(ceil(Double(count) / Double(perPage))))
-                let stargazersURL = URL(string: "https://api.github.com/repos/zachlatta/freeflow/stargazers?per_page=\(perPage)&page=\(lastPage)")!
+                let stargazersURL = URL(string: "https://api.github.com/repos/WilliamH07/Wisper/stargazers?per_page=\(perPage)&page=\(lastPage)")!
                 var request = URLRequest(url: stargazersURL)
                 request.setValue("application/vnd.github.v3.star+json", forHTTPHeaderField: "Accept")
                 let starredResult = try await URLSession.shared.data(for: request)
@@ -1461,7 +1536,7 @@ class GitHubMetadataCache: ObservableObject {
             }
 
             var contributors: [GitHubContributor] = []
-            let contributorsURL = URL(string: "https://api.github.com/repos/zachlatta/freeflow/contributors?per_page=15")!
+            let contributorsURL = URL(string: "https://api.github.com/repos/WilliamH07/Wisper/contributors?per_page=15")!
             do {
                 let contributorsResult = try await URLSession.shared.data(from: contributorsURL)
                 if let contribHTTP = contributorsResult.1 as? HTTPURLResponse,
@@ -1491,10 +1566,10 @@ private struct InlineTranscribingDots: View {
         HStack(spacing: 8) {
             ForEach(0..<3, id: \.self) { index in
                 Circle()
-                    .fill(Color.blue.opacity(activeDot == index ? 1.0 : 0.3))
+                    .fill(WisperPalette.processing.opacity(activeDot == index ? 1.0 : 0.3))
                     .frame(width: 12, height: 12)
                     .scaleEffect(activeDot == index ? 1.3 : 1.0)
-                    .animation(.easeInOut(duration: 0.3), value: activeDot)
+                    .animation(WisperMotion.contentChange, value: activeDot)
             }
         }
         .onReceive(timer) { _ in

@@ -1,7 +1,7 @@
 import Foundation
 import os.log
 
-private let transcriptionLog = OSLog(subsystem: "com.zachlatta.freeflow", category: "Transcription")
+private let transcriptionLog = OSLog(subsystem: "com.williamh07.wisper", category: "Transcription")
 
 class TranscriptionService {
     private static let modelsSupportingVerboseJSON: Set<String> = [
@@ -18,6 +18,7 @@ class TranscriptionService {
     private let baseURL: URL
     private let transcriptionModel: String
     private let language: String?
+    private let prompt: String?
     private var transcriptionResponseFormat: String {
         Self.responseFormat(forModel: transcriptionModel)
     }
@@ -30,7 +31,8 @@ class TranscriptionService {
         apiKey: String,
         baseURL: String = "https://api.groq.com/openai/v1",
         transcriptionModel: String = "whisper-large-v3",
-        language: String? = nil
+        language: String? = nil,
+        prompt: String? = nil
     ) throws {
         self.apiKey = apiKey
         self.baseURL = try Self.normalizedBaseURL(from: baseURL)
@@ -38,6 +40,8 @@ class TranscriptionService {
         self.transcriptionModel = trimmedModel.isEmpty ? "whisper-large-v3" : trimmedModel
         let trimmedLanguage = language?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.language = (trimmedLanguage?.isEmpty == false) ? trimmedLanguage : nil
+        let trimmedPrompt = prompt?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.prompt = (trimmedPrompt?.isEmpty == false) ? trimmedPrompt : nil
     }
 
     static func responseFormat(forModel model: String) -> String {
@@ -48,6 +52,9 @@ class TranscriptionService {
     // Validate API key by hitting a lightweight endpoint
     static func validateAPIKey(_ key: String, baseURL: String = "https://api.groq.com/openai/v1") async -> Bool {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed == "local" || baseURL.contains("127.0.0.1") || baseURL.contains("localhost") {
+            return true
+        }
         guard !trimmed.isEmpty else { return false }
         guard let baseURL = try? normalizedBaseURL(from: baseURL) else { return false }
 
@@ -68,6 +75,21 @@ class TranscriptionService {
     func transcribe(fileURL: URL) async throws -> String {
         guard !Task.isCancelled else {
             throw CancellationError()
+        }
+
+        // If local whisper is selected or local whisper is available
+        if transcriptionModel == "whisper-local" || LocalInferenceService.shared.isLocalWhisperAvailable {
+            do {
+                let localResult = try await LocalInferenceService.shared.transcribe(audioURL: fileURL, language: language, prompt: prompt)
+                if !localResult.isEmpty {
+                    return localResult
+                }
+            } catch {
+                os_log(.error, log: transcriptionLog, "Local whisper error: %{public}@", error.localizedDescription)
+                if transcriptionModel == "whisper-local" || apiKey.isEmpty {
+                    throw error
+                }
+            }
         }
 
         let timeoutSeconds = transcriptionTimeoutSeconds
@@ -111,6 +133,9 @@ class TranscriptionService {
 
     // Send audio file for transcription and return text
     private func transcribeAudio(fileURL: URL) async throws -> String {
+        if transcriptionModel == "whisper-local" || LocalInferenceService.shared.isLocalWhisperAvailable {
+            return try await LocalInferenceService.shared.transcribe(audioURL: fileURL, language: language, prompt: prompt)
+        }
         return try await transcribeAudioWithURLSession(fileURL: fileURL)
     }
 
@@ -132,6 +157,7 @@ class TranscriptionService {
             model: transcriptionModel,
             responseFormat: transcriptionResponseFormat,
             language: language,
+            prompt: prompt,
             boundary: boundary
         )
 
@@ -202,6 +228,7 @@ class TranscriptionService {
         model: String,
         responseFormat: String,
         language: String?,
+        prompt: String? = nil,
         boundary: String
     ) -> Data {
         var body = Data()
@@ -217,6 +244,12 @@ class TranscriptionService {
         append("--\(boundary)\r\n")
         append("Content-Disposition: form-data; name=\"response_format\"\r\n\r\n")
         append("\(responseFormat)\r\n")
+
+        if let prompt, !prompt.isEmpty {
+            append("--\(boundary)\r\n")
+            append("Content-Disposition: form-data; name=\"prompt\"\r\n\r\n")
+            append("\(prompt)\r\n")
+        }
 
         if let language, !language.isEmpty {
             append("--\(boundary)\r\n")

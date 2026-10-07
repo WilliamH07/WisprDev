@@ -56,12 +56,14 @@ enum ShortcutRole {
     case hold
     case toggle
     case copyAgain
+    case rewriteSelection
 
     var title: String {
         switch self {
         case .hold: return "Hold to Talk"
         case .toggle: return "Tap to Toggle"
         case .copyAgain: return "Paste Again"
+        case .rewriteSelection: return "Rewrite Selection"
         }
     }
 }
@@ -72,27 +74,34 @@ enum ShortcutEvent: Equatable {
     case toggleActivated
     case toggleDeactivated
     case copyAgainTriggered
+    case rewriteSelectionTriggered
 }
 
 struct ShortcutConfiguration: Equatable {
     let hold: ShortcutBinding
     let toggle: ShortcutBinding
     let copyAgain: ShortcutBinding
+    let rewriteSelection: ShortcutBinding
+    let rewriteSelectionAlternative: ShortcutBinding
     let permittedAdditionalExactMatchModifiers: ShortcutModifiers
 
     init(
         hold: ShortcutBinding,
         toggle: ShortcutBinding,
         copyAgain: ShortcutBinding = .disabled,
+        rewriteSelection: ShortcutBinding = .disabled,
+        rewriteSelectionAlternative: ShortcutBinding = .disabled,
         permittedAdditionalExactMatchModifiers: ShortcutModifiers = []
     ) {
         self.hold = hold
         self.toggle = toggle
         self.copyAgain = copyAgain
+        self.rewriteSelection = rewriteSelection
+        self.rewriteSelectionAlternative = rewriteSelectionAlternative
         self.permittedAdditionalExactMatchModifiers = permittedAdditionalExactMatchModifiers
     }
 
-    static let disabled = ShortcutConfiguration(hold: .disabled, toggle: .disabled, copyAgain: .disabled)
+    static let disabled = ShortcutConfiguration(hold: .disabled, toggle: .disabled, copyAgain: .disabled, rewriteSelection: .disabled, rewriteSelectionAlternative: .disabled)
 }
 
 enum ShortcutPreset: String, CaseIterable, Identifiable, Codable {
@@ -343,6 +352,14 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
     )
     static let defaultHold = ShortcutPreset.fnKey.binding
     static let defaultToggle = ShortcutPreset.fnKey.binding.withAddedModifiers(.command)
+    static let defaultRewriteSelection = ShortcutBinding(
+        keyCode: 15,
+        keyDisplay: "R",
+        modifiers: [.control, .option],
+        kind: .key,
+        preset: nil,
+        exactModifierKeyCodes: exactModifierKeyCodesPreservingSides(for: [.control, .option])
+    )
 
     static let modifierKeyCodes: Set<UInt16> = [54, 55, 56, 58, 59, 60, 61, 62, 63]
 

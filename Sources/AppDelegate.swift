@@ -29,10 +29,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 UpdateManager.shared.startPeriodicChecks()
             }
-
-            if !AXIsProcessTrusted() {
-                appState.showAccessibilityAlert()
-            }
         }
 
     }
@@ -43,6 +39,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             showSettingsWindow()
         }
         return true
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        LocalInferenceService.shared.stopServer()
     }
 
     @objc func handleShowSetup() {
@@ -171,10 +171,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         appState.startAccessibilityPolling()
         Task { @MainActor in
             UpdateManager.shared.startPeriodicChecks()
-        }
-
-        if !AXIsProcessTrusted() {
-            appState.showAccessibilityAlert()
         }
     }
 }

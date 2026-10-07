@@ -3,7 +3,7 @@ import CoreMedia
 import Foundation
 import os.log
 
-private let recordingLog = OSLog(subsystem: "com.zachlatta.freeflow", category: "Recording")
+private let recordingLog = OSLog(subsystem: "com.williamh07.wisper", category: "Recording")
 
 struct AudioDevice: Identifiable {
     let id: String
@@ -79,8 +79,8 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
     private let _bufferCount = OSAllocatedUnfairLock(initialState: 0)
     private let fileWriteErrorLock = OSAllocatedUnfairLock(initialState: ())
     private var watchdogTimer: DispatchSourceTimer?
-    private let sessionQueue = DispatchQueue(label: "com.zachlatta.freeflow.capture.session")
-    private let sampleBufferQueue = DispatchQueue(label: "com.zachlatta.freeflow.capture.samples")
+    private let sessionQueue = DispatchQueue(label: "com.williamh07.wisper.capture.session")
+    private let sampleBufferQueue = DispatchQueue(label: "com.williamh07.wisper.capture.samples")
     private var activeAudioFile: AVAudioFile?
     private var activeAudioFormat: AVAudioFormat?
     private var recordedFrameCount: AVAudioFramePosition = 0
@@ -92,6 +92,27 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
     private let _recording = OSAllocatedUnfairLock(initialState: false)
     @Published var audioLevel: Float = 0.0
     private let liveLevelNormalizerLock = OSAllocatedUnfairLock(initialState: LiveAudioLevelNormalizer())
+
+    var hasDetectedSpeech: Bool {
+        liveLevelNormalizerLock.withLock { $0.hasDetectedActiveSpeech }
+    }
+
+    var activeSpeechFrameCount: Int {
+        liveLevelNormalizerLock.withLock { $0.activeSpeechFrameCount }
+    }
+
+    var peakRMS: Float {
+        liveLevelNormalizerLock.withLock { $0.peakRMS }
+    }
+
+    var recordingDuration: TimeInterval {
+        guard recordingStartTime > 0 else { return 0 }
+        return CFAbsoluteTimeGetCurrent() - recordingStartTime
+    }
+
+    var bufferCount: Int {
+        _bufferCount.withLock { $0 }
+    }
 
     var onRecordingReady: (() -> Void)?
     var onRecordingFailure: ((Error) -> Void)?

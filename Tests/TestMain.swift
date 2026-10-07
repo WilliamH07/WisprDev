@@ -1,7 +1,7 @@
 import Foundation
 
 @main
-struct FreeFlowTests {
+struct WisperTests {
     static func main() {
         AppContextServiceTests.run()
         ModelConfigurationTests.run()
@@ -10,6 +10,10 @@ struct FreeFlowTests {
         LLMCooldownManagerTests.run()
         TranscriptionErrorPresentationCoreTests.run()
         TranscriptTextCoreTests.run()
-        print("FreeFlowTests passed")
+        AudioSilenceFilterTests.run()
+        AIAssistantAndRewriteTests.run()
+        HapticFeedbackServiceTests.run()
+        SemanticMemoryTests.run()
+        print("WisperTests passed")
     }
 }

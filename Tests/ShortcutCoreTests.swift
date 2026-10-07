@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 enum ShortcutCoreTests {
     static func run() {
@@ -9,6 +10,12 @@ enum ShortcutCoreTests {
         testReducerHonorsExactModifierMatching()
         testRepeatedKeyDownDoesNotReactivate()
         testPasteAgainFiresOnLeadingEdgeOnly()
+        testRewriteSelectionFiresOnLeadingEdgeOnly()
+        testRewriteSelectionRightOptionLifecycle()
+        testRewriteSelectionCustomKeyHasPressedShortcutInputs()
+        testModifierKeyEventStateMissingDeviceBitsFallback()
+        testModifierKeyEventStateIsKeyDown()
+        testRewriteSelectionKeyComboLifecycleWithSnapshotReconciliation()
         testBackendResetClearsActiveBindings()
         testBindingMigrationAndIdentity()
         testConflictDetection()
@@ -223,6 +230,211 @@ enum ShortcutCoreTests {
         TestSupport.expectEqual(repeated.emittedEvents, [])
         TestSupport.expectEqual(up.emittedEvents, [])
         TestSupport.expectEqual(secondDown.emittedEvents, [.copyAgainTriggered])
+    }
+
+    private static func testRewriteSelectionFiresOnLeadingEdgeOnly() {
+        let binding = ShortcutBinding(
+            keyCode: 15,
+            keyDisplay: "R",
+            modifiers: [.control, .option],
+            kind: .key,
+            preset: nil
+        )
+        let configuration = ShortcutConfiguration(hold: .disabled, toggle: .disabled, rewriteSelection: binding)
+        let firstDown = ShortcutMatcher.reduce(
+            state: ShortcutInputState(pressedModifierKeyCodes: [58, 59]), // Option (58) + Control (59)
+            event: .keyChanged(keyCode: 15, isDown: true, isRepeat: false),
+            configuration: configuration
+        )
+        let repeated = ShortcutMatcher.reduce(
+            state: firstDown.state,
+            event: .keyChanged(keyCode: 15, isDown: true, isRepeat: true),
+            configuration: configuration
+        )
+        let up = ShortcutMatcher.reduce(
+            state: repeated.state,
+            event: .keyChanged(keyCode: 15, isDown: false, isRepeat: false),
+            configuration: configuration
+        )
+        let secondDown = ShortcutMatcher.reduce(
+            state: up.state,
+            event: .keyChanged(keyCode: 15, isDown: true, isRepeat: false),
+            configuration: configuration
+        )
+
+        TestSupport.expectEqual(firstDown.emittedEvents, [.rewriteSelectionTriggered])
+        TestSupport.expectEqual(repeated.emittedEvents, [])
+        TestSupport.expectEqual(up.emittedEvents, [])
+        TestSupport.expectEqual(secondDown.emittedEvents, [.rewriteSelectionTriggered])
+    }
+
+    private static func testRewriteSelectionRightOptionLifecycle() {
+        let configuration = ShortcutConfiguration(
+            hold: .defaultHold,
+            toggle: .disabled,
+            rewriteSelection: ShortcutPreset.rightOption.binding
+        )
+        // Left Option down should trigger rewrite selection
+        let leftOptionDown = ShortcutMatcher.reduce(
+            state: ShortcutInputState(),
+            event: .modifierChanged(keyCode: 58, isDown: true),
+            configuration: configuration
+        )
+        TestSupport.expectEqual(leftOptionDown.emittedEvents, [.rewriteSelectionTriggered])
+        TestSupport.expectEqual(leftOptionDown.consumeDecision, .consume)
+        TestSupport.expect(leftOptionDown.state.hasPressedShortcutInputs(configuration: configuration), "Left Option should be detected as pressed input")
+
+        let leftOptionUp = ShortcutMatcher.reduce(
+            state: leftOptionDown.state,
+            event: .modifierChanged(keyCode: 58, isDown: false),
+            configuration: configuration
+        )
+        TestSupport.expectEqual(leftOptionUp.emittedEvents, [])
+        TestSupport.expect(!leftOptionUp.state.hasPressedShortcutInputs(configuration: configuration), "Left Option should no longer be detected after release")
+
+        // Right Option down should also trigger rewrite selection
+        let rightOptionDown = ShortcutMatcher.reduce(
+            state: ShortcutInputState(),
+            event: .modifierChanged(keyCode: 61, isDown: true),
+            configuration: configuration
+        )
+        TestSupport.expectEqual(rightOptionDown.emittedEvents, [.rewriteSelectionTriggered])
+        TestSupport.expectEqual(rightOptionDown.consumeDecision, .consume)
+        TestSupport.expect(rightOptionDown.state.hasPressedShortcutInputs(configuration: configuration), "Right Option should be detected as pressed input")
+
+        let rightOptionUp = ShortcutMatcher.reduce(
+            state: rightOptionDown.state,
+            event: .modifierChanged(keyCode: 61, isDown: false),
+            configuration: configuration
+        )
+        TestSupport.expectEqual(rightOptionUp.emittedEvents, [])
+        TestSupport.expect(!rightOptionUp.state.hasPressedShortcutInputs(configuration: configuration), "Right Option should no longer be detected after release")
+    }
+
+    private static func testRewriteSelectionCustomKeyHasPressedShortcutInputs() {
+        let binding = ShortcutBinding(
+            keyCode: 15,
+            keyDisplay: "R",
+            modifiers: [.control, .option],
+            kind: .key,
+            preset: nil
+        )
+        let configuration = ShortcutConfiguration(
+            hold: .defaultHold,
+            toggle: .disabled,
+            rewriteSelection: binding
+        )
+        let modState = ShortcutInputState(pressedModifierKeyCodes: [58, 59])
+        TestSupport.expect(modState.hasPressedShortcutInputs(configuration: configuration), "Modifiers for custom shortcut should be detected as pressed")
+
+        let keyState = ShortcutInputState(pressedKeyCodes: [15], pressedModifierKeyCodes: [58, 59])
+        TestSupport.expect(keyState.hasPressedShortcutInputs(configuration: configuration), "Key and modifiers should be detected as pressed")
+
+        let releasedState = ShortcutInputState()
+        TestSupport.expect(!releasedState.hasPressedShortcutInputs(configuration: configuration), "Released state should not have pressed inputs")
+    }
+
+    private static func testModifierKeyEventStateMissingDeviceBitsFallback() {
+        guard let event = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [.control, .option],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "r",
+            charactersIgnoringModifiers: "r",
+            isARepeat: false,
+            keyCode: 15
+        ) else {
+            TestSupport.expect(false, "Failed to create synthetic keyDown NSEvent")
+            return
+        }
+
+        // When device-specific raw flags are not present (typical for .keyDown events),
+        // pressedModifierKeyCodes must fall back to generic flags rather than returning an empty set.
+        let detectedCanonical = ModifierKeyEventState.pressedModifierKeyCodes(for: event)
+        TestSupport.expectEqual(detectedCanonical, [58, 59])
+
+        // When currentlyPressedKeyCodes has side-specific information (e.g. Right Option 61 and Right Control 62),
+        // reconciliation should preserve the specific key codes.
+        let detectedPreserved = ModifierKeyEventState.pressedModifierKeyCodes(
+            for: event,
+            currentlyPressedKeyCodes: [61, 62]
+        )
+        TestSupport.expectEqual(detectedPreserved, [61, 62])
+    }
+
+    private static func testModifierKeyEventStateIsKeyDown() {
+        let cgEvent = CGEvent(source: nil)
+        cgEvent?.type = .flagsChanged
+        cgEvent?.setIntegerValueField(.keyboardEventKeycode, value: 61) // Right Option
+        cgEvent?.flags = [.maskAlternate]
+
+        guard let cg = cgEvent, let nsEvent = NSEvent(cgEvent: cg) else {
+            TestSupport.expect(false, "Failed to create synthetic flagsChanged NSEvent")
+            return
+        }
+
+        // Even if device-specific bits are not set in the event flags, isKeyDown must recognize Option is pressed
+        let isDown = ModifierKeyEventState.isKeyDown(for: nsEvent)
+        TestSupport.expectEqual(isDown, true)
+
+        // When option flag is removed, isKeyDown should report false
+        cg.flags = []
+        if let releasedEvent = NSEvent(cgEvent: cg) {
+            TestSupport.expectEqual(ModifierKeyEventState.isKeyDown(for: releasedEvent), false)
+        }
+    }
+
+    private static func testRewriteSelectionKeyComboLifecycleWithSnapshotReconciliation() {
+        let configuration = ShortcutConfiguration(
+            hold: .disabled,
+            toggle: .disabled,
+            rewriteSelection: .defaultRewriteSelection
+        )
+
+        // 1. User presses Control (59)
+        let ctrlDown = ShortcutMatcher.reduce(
+            state: ShortcutInputState(),
+            event: .modifierChanged(keyCode: 59, isDown: true),
+            configuration: configuration
+        )
+        TestSupport.expectEqual(ctrlDown.state.pressedModifierKeyCodes, [59])
+
+        // 2. User presses Option (58)
+        let optDown = ShortcutMatcher.reduce(
+            state: ctrlDown.state,
+            event: .modifierChanged(keyCode: 58, isDown: true),
+            configuration: configuration
+        )
+        TestSupport.expectEqual(optDown.state.pressedModifierKeyCodes, [58, 59])
+
+        // 3. User presses 'R' (keyCode 15):
+        // GlobalShortcutBackend reconciles modifierSnapshot and emits keyChanged
+        let snapshotResult = ShortcutMatcher.reduce(
+            state: optDown.state,
+            event: .modifierSnapshot([58, 59]),
+            configuration: configuration
+        )
+        TestSupport.expectEqual(snapshotResult.state.pressedModifierKeyCodes, [58, 59])
+
+        let keyDownResult = ShortcutMatcher.reduce(
+            state: snapshotResult.state,
+            event: .keyChanged(keyCode: 15, isDown: true, isRepeat: false),
+            configuration: configuration
+        )
+        TestSupport.expectEqual(keyDownResult.emittedEvents, [.rewriteSelectionTriggered])
+        TestSupport.expectEqual(keyDownResult.consumeDecision, .consume)
+
+        // 4. Test that right-side modifiers (61 and 62) also trigger defaultRewriteSelection
+        let rightSideState = ShortcutInputState(pressedModifierKeyCodes: [61, 62])
+        let rightSideKeyDown = ShortcutMatcher.reduce(
+            state: rightSideState,
+            event: .keyChanged(keyCode: 15, isDown: true, isRepeat: false),
+            configuration: configuration
+        )
+        TestSupport.expectEqual(rightSideKeyDown.emittedEvents, [.rewriteSelectionTriggered])
     }
 
     private static func testBackendResetClearsActiveBindings() {

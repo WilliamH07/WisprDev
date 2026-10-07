@@ -11,6 +11,7 @@ struct DictationShortcutEditor: View {
     @State private var holdValidationMessage: String?
     @State private var toggleValidationMessage: String?
     @State private var copyAgainValidationMessage: String?
+    @State private var rewriteSelectionValidationMessage: String?
 
     init(showsIntroText: Bool = true, onCaptureStateChange: ((Bool) -> Void)? = nil) {
         self.showsIntroText = showsIntroText
@@ -67,6 +68,19 @@ struct DictationShortcutEditor: View {
                 ),
                 onSelect: { binding in
                     copyAgainValidationMessage = appState.setShortcut(binding, for: .copyAgain)
+                }
+            )
+
+            ShortcutRoleSection(
+                role: .rewriteSelection,
+                selection: appState.rewriteSelectionShortcut,
+                validationMessage: rewriteSelectionValidationMessage,
+                isCapturing: Binding(
+                    get: { activeCaptureRole == .rewriteSelection },
+                    set: { activeCaptureRole = $0 ? .rewriteSelection : nil }
+                ),
+                onSelect: { binding in
+                    rewriteSelectionValidationMessage = appState.setShortcut(binding, for: .rewriteSelection)
                 }
             )
 
@@ -300,8 +314,8 @@ private struct ShortcutCaptureRow: View {
             cancelCapture()
             return
         }
-        onCapture(currentBinding)
         stopCapture(clearCaptureState: true)
+        onCapture(currentBinding)
     }
 
     private func cancelCapture() {

@@ -24,6 +24,19 @@ struct AppContext {
     var contextSummary: String {
         currentActivity
     }
+
+    static let empty = AppContext(
+        appName: nil,
+        bundleIdentifier: nil,
+        windowTitle: nil,
+        selectedText: nil,
+        currentActivity: "",
+        contextSystemPrompt: nil,
+        contextPrompt: nil,
+        screenshotDataURL: nil,
+        screenshotMimeType: nil,
+        screenshotError: nil
+    )
 }
 
 final class AppContextService {

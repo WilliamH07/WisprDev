@@ -18,6 +18,7 @@ struct ShortcutInputState: Equatable {
     var holdIsActive = false
     var toggleIsActive = false
     var copyAgainIsActive = false
+    var rewriteSelectionIsActive = false
 
     var currentModifiers: ShortcutModifiers {
         ShortcutBinding.modifiers(for: pressedModifierKeyCodes)
@@ -29,7 +30,9 @@ struct ShortcutInputState: Equatable {
             let isHoldKey = configuration.hold.kind == .key && configuration.hold.keyCode == keyCode
             let isToggleKey = configuration.toggle.kind == .key && configuration.toggle.keyCode == keyCode
             let isCopyAgainKey = configuration.copyAgain.kind == .key && configuration.copyAgain.keyCode == keyCode
-            return isHoldKey || isToggleKey || isCopyAgainKey
+            let isRewriteSelectionKey = configuration.rewriteSelection.kind == .key && configuration.rewriteSelection.keyCode == keyCode
+            let isRewriteSelectionAltKey = configuration.rewriteSelectionAlternative.kind == .key && configuration.rewriteSelectionAlternative.keyCode == keyCode
+            return isHoldKey || isToggleKey || isCopyAgainKey || isRewriteSelectionKey || isRewriteSelectionAltKey
         }
         if keyReferenceHeld {
             return true
@@ -57,6 +60,29 @@ struct ShortcutInputState: Equatable {
             permittedAdditionalExactMatchModifiers: configuration.permittedAdditionalExactMatchModifiers
         ) {
             return true
+        }
+
+        if configuration.rewriteSelection.referencesPressedModifiers(
+            pressedModifierKeyCodes: pressedModifierKeyCodes,
+            currentModifiers: currentModifiers,
+            permittedAdditionalExactMatchModifiers: configuration.permittedAdditionalExactMatchModifiers
+        ) {
+            return true
+        }
+
+        if configuration.rewriteSelectionAlternative.referencesPressedModifiers(
+            pressedModifierKeyCodes: pressedModifierKeyCodes,
+            currentModifiers: currentModifiers,
+            permittedAdditionalExactMatchModifiers: configuration.permittedAdditionalExactMatchModifiers
+        ) {
+            return true
+        }
+
+        if (configuration.rewriteSelection.kind == .modifierKey && (configuration.rewriteSelection.keyCode == 58 || configuration.rewriteSelection.keyCode == 61)) ||
+           (configuration.rewriteSelectionAlternative.kind == .modifierKey && (configuration.rewriteSelectionAlternative.keyCode == 58 || configuration.rewriteSelectionAlternative.keyCode == 61)) {
+            if pressedModifierKeyCodes.contains(58) || pressedModifierKeyCodes.contains(61) {
+                return true
+            }
         }
 
         return false
@@ -174,18 +200,24 @@ enum ShortcutMatcher {
         let previousHold = state.holdIsActive
         let previousToggle = state.toggleIsActive
         let previousCopyAgain = state.copyAgainIsActive
+        let previousRewriteSelection = state.rewriteSelectionIsActive
 
         state.holdIsActive = bindingIsActive(configuration.hold, state: state, configuration: configuration)
         state.toggleIsActive = bindingIsActive(configuration.toggle, state: state, configuration: configuration)
         state.copyAgainIsActive = bindingIsActive(configuration.copyAgain, state: state, configuration: configuration)
+        let primaryRewrite = bindingIsActive(configuration.rewriteSelection, state: state, configuration: configuration)
+        let altRewrite = bindingIsActive(configuration.rewriteSelectionAlternative, state: state, configuration: configuration)
+        state.rewriteSelectionIsActive = primaryRewrite || altRewrite
 
         return emitChanges(
             previousHold: previousHold,
             previousToggle: previousToggle,
             previousCopyAgain: previousCopyAgain,
+            previousRewriteSelection: previousRewriteSelection,
             currentHold: state.holdIsActive,
             currentToggle: state.toggleIsActive,
             currentCopyAgain: state.copyAgainIsActive,
+            currentRewriteSelection: state.rewriteSelectionIsActive,
             configuration: configuration
         )
     }
@@ -194,9 +226,11 @@ enum ShortcutMatcher {
         previousHold: Bool,
         previousToggle: Bool,
         previousCopyAgain: Bool,
+        previousRewriteSelection: Bool,
         currentHold: Bool,
         currentToggle: Bool,
         currentCopyAgain: Bool,
+        currentRewriteSelection: Bool,
         configuration: ShortcutConfiguration
     ) -> [ShortcutEvent] {
         var activations: [(ShortcutEvent, Int)] = []
@@ -211,6 +245,11 @@ enum ShortcutMatcher {
         // Paste Again is a one-shot: fire on the leading edge only.
         if !previousCopyAgain && currentCopyAgain {
             activations.append((.copyAgainTriggered, configuration.copyAgain.specificityScore))
+        }
+        // Rewrite Selection is a one-shot: fire on the leading edge only.
+        if !previousRewriteSelection && currentRewriteSelection {
+            let specificity = max(configuration.rewriteSelection.specificityScore, configuration.rewriteSelectionAlternative.specificityScore)
+            activations.append((.rewriteSelectionTriggered, specificity))
         }
         if previousHold && !currentHold {
             deactivations.append((.holdDeactivated, configuration.hold.specificityScore))
@@ -245,7 +284,14 @@ enum ShortcutMatcher {
         case .key:
             return state.pressedKeyCodes.contains(binding.keyCode)
         case .modifierKey:
-            return state.pressedModifierKeyCodes.contains(binding.keyCode)
+            if state.pressedModifierKeyCodes.contains(binding.keyCode) {
+                return true
+            }
+            if (binding == configuration.rewriteSelection || binding == configuration.rewriteSelectionAlternative),
+               (binding.keyCode == 58 || binding.keyCode == 61) {
+                return state.pressedModifierKeyCodes.contains(58) || state.pressedModifierKeyCodes.contains(61)
+            }
+            return false
         }
     }
 
@@ -273,7 +319,7 @@ enum ShortcutMatcher {
         for keyCode: UInt16,
         configuration: ShortcutConfiguration
     ) -> [ShortcutBinding] {
-        [configuration.hold, configuration.toggle, configuration.copyAgain].filter { binding in
+        [configuration.hold, configuration.toggle, configuration.copyAgain, configuration.rewriteSelection, configuration.rewriteSelectionAlternative].filter { binding in
             binding.kind == .key && binding.keyCode == keyCode
         }
     }
@@ -282,7 +328,7 @@ enum ShortcutMatcher {
         for keyCode: UInt16,
         configuration: ShortcutConfiguration
     ) -> [ShortcutBinding] {
-        [configuration.hold, configuration.toggle, configuration.copyAgain].filter { binding in
+        [configuration.hold, configuration.toggle, configuration.copyAgain, configuration.rewriteSelection, configuration.rewriteSelectionAlternative].filter { binding in
             switch binding.kind {
             case .key, .modifierKey:
                 return modifierEvent(for: keyCode, affects: binding)
@@ -294,6 +340,10 @@ enum ShortcutMatcher {
 
     private static func modifierEvent(for keyCode: UInt16, affects binding: ShortcutBinding) -> Bool {
         if binding.keyCode == keyCode {
+            return true
+        }
+
+        if (binding.keyCode == 58 || binding.keyCode == 61) && (keyCode == 58 || keyCode == 61) {
             return true
         }
 

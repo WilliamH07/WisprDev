@@ -39,4 +39,19 @@ enum LLMAPITransport {
         defer { session.finishTasksAndInvalidate() }
         return try await session.upload(for: request, from: bodyData)
     }
+
+    private static let streamingSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.urlCache = nil
+        configuration.timeoutIntervalForRequest = 120
+        configuration.timeoutIntervalForResource = 300
+        return URLSession(configuration: configuration)
+    }()
+
+    static func bytes(
+        for request: URLRequest
+    ) async throws -> (URLSession.AsyncBytes, URLResponse) {
+        return try await streamingSession.bytes(for: request)
+    }
 }

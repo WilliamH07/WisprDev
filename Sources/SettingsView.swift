@@ -16,18 +16,34 @@ private struct SettingsCard<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(title, systemImage: icon)
-                .font(.headline)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 26, height: 26)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.accentColor.opacity(0.85), Color.accentColor.opacity(0.55)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    )
+                Text(title)
+                    .font(.headline)
+            }
             content
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
-        .cornerRadius(10)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.primary.opacity(0.07), lineWidth: 1)
         )
     }
 }
@@ -423,13 +439,11 @@ struct SettingsView: View {
                     Button {
                         appState.selectedSettingsTab = tab
                     } label: {
-                        SettingsSidebarRow(title: tab.title, icon: tab.icon)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(appState.selectedSettingsTab == tab
-                                          ? Color.accentColor.opacity(0.15)
-                                          : Color.clear)
-                            )
+                        SettingsSidebarRow(
+                            title: tab.title,
+                            icon: tab.icon,
+                            isSelected: appState.selectedSettingsTab == tab
+                        )
                     }
                     .buttonStyle(.plain)
                 }
@@ -437,7 +451,7 @@ struct SettingsView: View {
                 Spacer()
             }
             .padding(10)
-            .frame(width: 180)
+            .frame(width: 190)
             .background(Color(nsColor: .windowBackgroundColor))
 
             Divider()
@@ -446,6 +460,12 @@ struct SettingsView: View {
                 switch appState.selectedSettingsTab {
                 case .general, .none:
                     GeneralSettingsView()
+                case .shortcuts:
+                    ShortcutsSettingsView()
+                case .ai:
+                    AISettingsView()
+                case .audio:
+                    AudioSettingsView()
                 case .prompts:
                     PromptsSettingsView()
                 case .macros:
@@ -464,22 +484,27 @@ struct SettingsView: View {
 private struct SettingsSidebarRow: View {
     let title: String
     let icon: String
+    let isSelected: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 9) {
             Image(systemName: icon)
-                .font(.system(size: 13, weight: .regular))
-                .frame(width: 16, height: 16, alignment: .center)
-                .foregroundStyle(.primary)
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: 18, height: 18, alignment: .center)
+                .foregroundStyle(isSelected ? Color.white : Color.accentColor)
 
             Text(title)
-                .font(.body)
+                .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                .foregroundStyle(isSelected ? Color.white : Color.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(height: 16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 8)
+        .padding(.vertical, 7)
         .padding(.horizontal, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(isSelected ? Color.accentColor : Color.clear)
+        )
+        .contentShape(Rectangle())
     }
 }
 
@@ -491,7 +516,7 @@ struct DebugSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("Debug")
+                Text("Débogage")
                     .font(.largeTitle.bold())
 
                 SettingsCard("Overlay", icon: "wrench.and.screwdriver") {
@@ -533,25 +558,15 @@ struct GeneralSettingsView: View {
     @Environment(\.openURL) private var openURL
     @AppStorage("show_menu_bar_icon") private var showMenuBarIcon = true
     @AppStorage("overlay_display_id") private var overlayDisplayID = 0
-    @AppStorage("use_compact_overlay") private var useCompactOverlay = true
+    @AppStorage("use_compact_overlay") private var useCompactOverlay = false
+    @AppStorage("overlay_glass_style") private var overlayGlassStyle = OverlayGlassStyle.liquidGlass.rawValue
     @State private var screensVersion = 0
-    @State private var apiKeyInput: String = ""
-    @State private var apiBaseURLInput: String = ""
-    @State private var transcriptionAPIURLInput: String = ""
-    @State private var transcriptionAPIKeyInput: String = ""
-    @State private var advancedProviderSettingsExpanded = false
-    @State private var isValidatingKey = false
-    @State private var keyValidationError: String?
-    @State private var keyValidationSuccess = false
-    @State private var customVocabularyInput: String = ""
-    @FocusState private var customVocabularyFocused: Bool
     @State private var micPermissionGranted = false
-    @State private var showMutedHint = false
     @State private var copiedBuildInfo = false
     @State private var copiedBuildInfoResetWorkItem: DispatchWorkItem?
     @StateObject private var githubCache = GitHubMetadataCache.shared
     @ObservedObject private var updateManager = UpdateManager.shared
-    private let freeflowRepoURL = URL(string: "https://github.com/zachlatta/freeflow")!
+    private let wisperRepoURL = URL(string: "https://github.com/WilliamH07/Wisper")!
 
     private var appDisplayName: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
@@ -564,7 +579,8 @@ struct GeneralSettingsView: View {
     }
 
     private var appBuildNumber: String {
-        Bundle.main.object(forInfoDictionaryKey: "FreeFlowBuildTag") as? String
+        Bundle.main.object(forInfoDictionaryKey: "WisperBuildTag") as? String
+            ?? Bundle.main.object(forInfoDictionaryKey: "FreeFlowBuildTag") as? String
             ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
             ?? "unknown"
     }
@@ -591,554 +607,208 @@ struct GeneralSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
-                // App branding header
-                VStack(spacing: 12) {
-                    Image(nsImage: NSApp.applicationIconImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 64, height: 64)
+                // App Branding Header
+                brandingHeader
 
-                    Text(AppName.displayName)
-                        .font(.system(size: 20, weight: .bold, design: .rounded))
-
-                    Text("v\(appVersion)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    // GitHub card
-                    VStack(spacing: 10) {
-                        HStack(spacing: 8) {
-                            AsyncImage(url: URL(string: "https://avatars.githubusercontent.com/u/992248")) { phase in
-                                switch phase {
-                                case .success(let image):
-                                    image.resizable().aspectRatio(contentMode: .fill)
-                                default:
-                                    Color.gray.opacity(0.2)
-                                }
-                            }
-                            .frame(width: 22, height: 22)
-                            .clipShape(Circle())
-
-                            Button {
-                                openURL(freeflowRepoURL)
-                            } label: {
-                                Text("zachlatta/freeflow")
-                                    .font(.system(.caption, design: .monospaced).weight(.medium))
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.blue)
-
-                            Spacer()
-
-                            HStack(spacing: 4) {
-                                Image(systemName: "star.fill")
-                                    .foregroundStyle(.yellow)
-                                    .font(.caption2)
-                                if githubCache.isLoading {
-                                    ProgressView().scaleEffect(0.5)
-                                } else if let count = githubCache.starCount {
-                                    Text("\(count.formatted()) \(count == 1 ? "star" : "stars")")
-                                        .font(.caption2.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Capsule().fill(Color.yellow.opacity(0.14)))
-
-                            Button {
-                                openURL(freeflowRepoURL)
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "star")
-                                    Text("Star")
-                                }
-                                .font(.caption.weight(.semibold))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(Capsule().fill(Color.yellow.opacity(0.18)))
-                            }
-                            .buttonStyle(.plain)
-                        }
-
-                        if !githubCache.recentStargazers.isEmpty {
-                            Divider()
-                            HStack(spacing: 8) {
-                                HStack(spacing: -6) {
-                                    ForEach(githubCache.recentStargazers) { star in
-                                        Button {
-                                            openURL(star.user.htmlUrl)
-                                        } label: {
-                                            AsyncImage(url: star.user.avatarThumbnailUrl) { phase in
-                                                switch phase {
-                                                case .success(let image):
-                                                    image.resizable().aspectRatio(contentMode: .fill)
-                                                default:
-                                                    Color.gray.opacity(0.2)
-                                                }
-                                            }
-                                            .frame(width: 22, height: 22)
-                                            .clipShape(Circle())
-                                            .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                                .clipped()
-                                Text("recently starred")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                                    .fixedSize()
-                                Spacer()
-                            }
-                            .clipped()
-                        }
-                    }
-                    .padding(12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(.ultraThinMaterial)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                            )
-                    )
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.top, 4)
-                .padding(.bottom, 4)
-
-                SettingsCard("App", icon: "power") {
+                SettingsCard("Application", icon: "power") {
                     startupSection
                 }
-                SettingsCard("Updates", icon: "arrow.triangle.2.circlepath") {
-                    updatesSection
-                }
-                SettingsCard("API Key", icon: "key.fill") {
-                    apiKeySection
-                }
-                SettingsCard("Output Language", icon: "globe") {
-                    outputLanguageSection
-                }
-                SettingsCard("Dictation Shortcuts", icon: "keyboard.fill") {
-                    hotkeySection
-                }
-                SettingsCard("Audio During Dictation", icon: "speaker.slash.fill") {
-                    dictationAudioSection
-                }
-                SettingsCard("Recording Overlay", icon: "rectangle.dashed") {
+
+                SettingsCard("Affichage & Overlay d'enregistrement", icon: "rectangle.dashed") {
                     overlaySection
                 }
-                SettingsCard("Edit Mode", icon: "pencil") {
-                    commandModeSection
-                }
-                SettingsCard("Cleanup", icon: "sparkles") {
-                    cleanupSection
-                }
-                SettingsCard("Clipboard", icon: "doc.on.clipboard") {
+
+                SettingsCard("Presse-papiers & Saisie", icon: "doc.on.clipboard") {
                     clipboardSection
                 }
-                SettingsCard("Microphone", icon: "mic.fill") {
-                    microphoneSection
-                }
-                SettingsCard("Sound Volume", icon: "speaker.wave.2.fill") {
-                    soundVolumeSection
-                }
-                SettingsCard("Custom Vocabulary", icon: "text.book.closed.fill") {
-                    vocabularySection
-                }
-                SettingsCard("Permissions", icon: "lock.shield.fill") {
+
+                SettingsCard("Permissions Système", icon: "lock.shield") {
                     permissionsSection
                 }
-                SettingsCard("Build", icon: "info.circle.fill") {
+
+                SettingsCard("Mises à jour & Informations", icon: "arrow.triangle.2.circlepath") {
+                    updatesSection
+                    Divider()
                     buildInfoSection
                 }
             }
             .padding(24)
         }
         .onAppear {
-            apiKeyInput = appState.apiKey
-            apiBaseURLInput = appState.apiBaseURL
-            transcriptionAPIURLInput = appState.transcriptionAPIURL
-            transcriptionAPIKeyInput = appState.transcriptionAPIKey
-            customVocabularyInput = appState.customVocabulary
             checkMicPermission()
             appState.refreshLaunchAtLoginStatus()
             Task { await githubCache.fetchIfNeeded() }
         }
-        .onDisappear {
-            commitCustomVocabulary()
-        }
-        .onChange(of: appState.transcriptionAPIURL) { value in
-            if transcriptionAPIURLInput != value {
-                transcriptionAPIURLInput = value
+    }
+
+    // MARK: Branding Header
+
+    private var brandingHeader: some View {
+        VStack(spacing: 12) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 56, height: 56)
+
+            Text(AppName.displayName)
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+
+            Text("v\(appVersion)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            // GitHub Author card
+            HStack(spacing: 8) {
+                AsyncImage(url: URL(string: "https://github.com/WilliamH07.png")) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    default:
+                        Color.gray.opacity(0.2)
+                    }
+                }
+                .frame(width: 22, height: 22)
+                .clipShape(Circle())
+
+                Button {
+                    openURL(wisperRepoURL)
+                } label: {
+                    Text("WilliamH07/Wisper")
+                        .font(.system(.caption, design: .monospaced).weight(.medium))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.blue)
+
+                Spacer()
+
+                HStack(spacing: 4) {
+                    Image(systemName: "star.fill")
+                        .foregroundStyle(.yellow)
+                        .font(.caption2)
+                    if githubCache.isLoading {
+                        ProgressView().scaleEffect(0.5)
+                    } else if let count = githubCache.starCount {
+                        Text("\(count.formatted()) \(count == 1 ? "star" : "stars")")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(Color.yellow.opacity(0.14)))
+
+                Button {
+                    openURL(wisperRepoURL)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "star")
+                        Text("Star")
+                    }
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(Color.yellow.opacity(0.18)))
+                }
+                .buttonStyle(.plain)
             }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    )
+            )
         }
-        .onChange(of: appState.transcriptionAPIKey) { value in
-            if transcriptionAPIKeyInput != value {
-                transcriptionAPIKeyInput = value
-            }
-        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
     }
 
     // MARK: Startup
 
     private var startupSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Toggle("Launch \(AppName.displayName) at login", isOn: $appState.launchAtLogin)
-            Toggle("Show menu bar icon", isOn: $showMenuBarIcon)
+            Toggle("Lancer \(AppName.displayName) au démarrage", isOn: $appState.launchAtLogin)
 
-            if SMAppService.mainApp.status == .requiresApproval {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                        .font(.caption)
-                    Text("Login item requires approval in System Settings.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button("Open Login Items Settings") {
-                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")!)
-                    }
-                    .font(.caption)
-                }
-            }
-        }
-    }
+            Toggle("Afficher dans la barre des menus", isOn: $showMenuBarIcon)
 
-    // MARK: Updates
-
-    private var updatesSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Toggle("Automatically check for updates", isOn: Binding(
-                get: { updateManager.autoCheckEnabled },
-                set: { updateManager.autoCheckEnabled = $0 }
-            ))
-
-            HStack(spacing: 10) {
-                Button {
-                    Task {
-                        await updateManager.checkForUpdates(userInitiated: true)
-                    }
-                } label: {
-                    if updateManager.isChecking {
-                        HStack(spacing: 6) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Checking...")
-                        }
-                    } else {
-                        Text("Check for Updates Now")
-                    }
-                }
-                .disabled(updateManager.isChecking || updateManager.updateStatus != .idle)
-
-                if let lastCheck = updateManager.lastCheckDate {
-                    Text("Last checked: \(lastCheck.formatted(date: .abbreviated, time: .shortened))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if updateManager.updateAvailable {
-                VStack(alignment: .leading, spacing: 8) {
-                    switch updateManager.updateStatus {
-                    case .downloading:
-                        HStack(spacing: 8) {
-                            Image(systemName: "arrow.down.circle.fill")
-                                .foregroundStyle(.blue)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Downloading update...")
-                                    .font(.caption.weight(.semibold))
-                                ProgressView(value: updateManager.downloadProgress ?? 0)
-                                    .progressViewStyle(.linear)
-                                if let progress = updateManager.downloadProgress {
-                                    Text("\(Int(progress * 100))%")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            Spacer()
-                            Button("Cancel") {
-                                updateManager.cancelDownload()
-                            }
-                            .font(.caption)
-                        }
-
-                    case .installing:
-                        HStack(spacing: 8) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Installing update...")
-                                .font(.caption.weight(.semibold))
-                        }
-
-                    case .readyToRelaunch:
-                        HStack(spacing: 8) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Relaunching...")
-                                .font(.caption.weight(.semibold))
-                        }
-
-                    case .error(let message):
-                        HStack(spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.red)
-                            Text(message)
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                            Spacer()
-                            Button("Retry") {
-                                updateManager.updateStatus = .idle
-                                if let release = updateManager.latestRelease {
-                                    updateManager.downloadAndInstall(release: release)
-                                }
-                            }
-                            .font(.caption)
-                        }
-
-                    case .idle:
-                        HStack(spacing: 8) {
-                            Image(systemName: "arrow.down.circle.fill")
-                                .foregroundStyle(.blue)
-                            Text(updateManager.latestReleaseVersion.isEmpty
-                                ? "A new version of \(AppName.displayName) is available!"
-                                : "\(AppName.displayName) v\(updateManager.latestReleaseVersion) is available!")
-                                .font(.caption.weight(.semibold))
-                            Spacer()
-                            Button("What's New") {
-                                updateManager.showReleaseNotes()
-                            }
-                            .font(.caption)
-                            Button("Update Now") {
-                                if let release = updateManager.latestRelease {
-                                    updateManager.downloadAndInstall(release: release)
-                                }
-                            }
-                            .font(.caption)
-                        }
-                    }
-                }
-                .padding(10)
-                .background(Color.blue.opacity(0.1))
-                .cornerRadius(6)
-            }
-        }
-    }
-
-    // MARK: Build
-
-    private var buildInfoSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Build number")
-                    .font(.caption.weight(.semibold))
-                Spacer()
-                Text(appBuildNumber)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-            }
-
-            HStack(alignment: .top, spacing: 12) {
-                Text(buildDiagnosticsText)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-
-                Spacer()
-
-                Button {
-                    copyBuildDiagnostics()
-                } label: {
-                    Label(copiedBuildInfo ? "Copied" : "Copy", systemImage: copiedBuildInfo ? "checkmark" : "doc.on.doc")
-                }
-                .font(.caption)
-            }
-        }
-    }
-
-    private func copyBuildDiagnostics() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(buildDiagnosticsText, forType: .string)
-        copiedBuildInfo = true
-
-        copiedBuildInfoResetWorkItem?.cancel()
-
-        let resetWorkItem = DispatchWorkItem {
-            copiedBuildInfo = false
-            copiedBuildInfoResetWorkItem = nil
-        }
-        copiedBuildInfoResetWorkItem = resetWorkItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: resetWorkItem)
-    }
-
-    // MARK: API Key
-
-    private var apiKeySection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("\(AppName.displayName) uses the configured transcription model with your selected OpenAI-compatible provider.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 8) {
-                SecureField("Enter your Groq API key", text: $apiKeyInput)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-                    .disabled(isValidatingKey)
-                    .onChange(of: apiKeyInput) { _ in
-                        keyValidationError = nil
-                        keyValidationSuccess = false
-                    }
-
-                Button(isValidatingKey ? "Validating..." : "Save") {
-                    validateAndSaveKey()
-                }
-                .disabled(apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isValidatingKey)
-            }
-
-            if let error = keyValidationError {
-                Label(error, systemImage: "xmark.circle.fill")
-                    .foregroundStyle(.red)
-                    .font(.caption)
-            } else if keyValidationSuccess {
-                Label("API key saved", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                    .font(.caption)
-            }
-
-            DisclosureGroup(isExpanded: $advancedProviderSettingsExpanded) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Divider()
-                    ProviderSettingsFields(
-                        apiBaseURLInput: $apiBaseURLInput,
-                        transcriptionAPIURLInput: $transcriptionAPIURLInput,
-                        transcriptionAPIKeyInput: $transcriptionAPIKeyInput,
-                        showsModelDescription: false
-                    )
-                }
-            } label: {
-                HStack {
-                    Text("Advanced Provider Settings")
-                    Spacer()
-                }
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    advancedProviderSettingsExpanded.toggle()
-                }
-            }
-            .padding(.top, 4)
-        }
-    }
-
-    private func validateAndSaveKey() {
-        let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseURL = apiBaseURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        isValidatingKey = true
-        keyValidationError = nil
-        keyValidationSuccess = false
-
-        Task {
-            let valid = await TranscriptionService.validateAPIKey(
-                key,
-                baseURL: baseURL.isEmpty ? AppState.defaultAPIBaseURL : baseURL
-            )
-            await MainActor.run {
-                isValidatingKey = false
-                if valid {
-                    appState.apiKey = key
-                    keyValidationSuccess = true
-                } else {
-                    keyValidationError = "Validation failed. Please check your API key and provider settings, then try again."
-                }
-            }
-        }
-    }
-
-    // MARK: Output Language
-
-    private static let outputLanguageOptions = [
-        "",
-        "English",
-        "Chinese (Simplified)",
-        "Chinese (Traditional)",
-        "Spanish",
-        "French",
-        "Japanese",
-        "Korean",
-        "German",
-        "Portuguese",
-    ]
-
-    private var outputLanguageSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Picker("Language", selection: $appState.outputLanguage) {
-                Text("Same as spoken").tag("")
-                ForEach(Self.outputLanguageOptions.dropFirst(), id: \.self) { lang in
-                    Text(lang).tag(lang)
-                }
-            }
-            .pickerStyle(.menu)
-
-            Text("When set, FreeFlow translates your speech into the selected language.")
+            Text("Les changements prennent effet immédiatement.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
     }
 
-    // MARK: Dictation Shortcuts
-
-    private var hotkeySection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            DictationShortcutEditor { isCapturing in
-                if isCapturing {
-                    appState.suspendHotkeyMonitoringForShortcutCapture()
-                } else {
-                    appState.resumeHotkeyMonitoringAfterShortcutCapture()
-                }
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Shortcut Start Delay")
-                        .font(.caption.weight(.semibold))
-                    Spacer()
-                    Text("\(appState.shortcutStartDelayMilliseconds) ms")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-
-                Slider(
-                    value: $appState.shortcutStartDelay,
-                    in: 0...0.5,
-                    step: 0.025
-                )
-
-                Text("Applies before recording starts for both hold and tap shortcuts. Stopping still happens immediately.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    // MARK: Recording Overlay
+    // MARK: Overlay
 
     private var overlaySection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Disposition :")
+                .font(.system(size: 13, weight: .semibold))
+
             OverlayStyleOptionRow(
-                title: "Minimalist menu-bar overlay",
-                subtitle: "Two slim wings flank the camera notch and stay inside the menu bar. Never covers app tabs or toolbars.",
+                title: "Overlay minimaliste barre des menus",
+                subtitle: "Deux fines ailes discrètes de chaque côté de l'encoche, sans couvrir les fenêtres.",
                 isMinimalist: true,
                 selection: $useCompactOverlay
             )
             OverlayStyleOptionRow(
-                title: "Drop-down pill",
-                subtitle: "Single pill hangs below the menu bar during recording. Larger and more visible, but covers a thin strip of whatever app is active.",
+                title: "Pilule flottante classique",
+                subtitle: "Pilule élégante sous la barre des menus affichant les niveaux audio.",
                 isMinimalist: false,
                 selection: $useCompactOverlay
             )
+
+            Divider()
+
+            Text("Finition visuelle (Design) :")
+                .font(.system(size: 13, weight: .semibold))
+
+            VStack(spacing: 8) {
+                ForEach(OverlayGlassStyle.allCases) { style in
+                    Button {
+                        overlayGlassStyle = style.rawValue
+                    } label: {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: overlayGlassStyle == style.rawValue ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(overlayGlassStyle == style.rawValue ? Color.accentColor : Color.secondary)
+                                .font(.system(size: 14))
+                                .padding(.top, 2)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text(style.title)
+                                        .font(.system(size: 13, weight: .medium))
+                                    if style == .liquidGlass {
+                                        Text("RECOMMANDÉ")
+                                            .font(.system(size: 9, weight: .bold))
+                                            .foregroundStyle(Color.accentColor)
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 1.5)
+                                            .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                                    }
+                                }
+
+                                Text(style.description)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+                        }
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(overlayGlassStyle == style.rawValue ? Color.accentColor.opacity(0.06) : Color.primary.opacity(0.02))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(overlayGlassStyle == style.rawValue ? Color.accentColor.opacity(0.3) : Color.primary.opacity(0.06), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
 
             Divider()
 
@@ -1146,45 +816,23 @@ struct GeneralSettingsView: View {
         }
     }
 
-    // MARK: Audio During Dictation
-
-    private var dictationAudioSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Toggle(
-                "Mute audio when dictation starts",
-                isOn: $appState.dictationAudioInterruptionEnabled
-            )
-
-            Text("\(AppName.displayName) restores the audio state it changed when dictation ends.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    /// Picks which physical display the recording overlay drops down on.
-    /// Without this, AppKit defaults to "the screen with the active key
-    /// window" (NSScreen.main), which makes the pill follow focus across
-    /// monitors — disorienting on multi-display setups.
     private var overlayDisplaySection: some View {
         HStack {
-            Text("Show on")
+            Text("Afficher sur :")
                 .font(.system(size: 13))
             Spacer()
             Picker("", selection: $overlayDisplayID) {
-                Text("Active window (default)").tag(0)
-                Text("Primary display").tag(-1)
+                Text("Fenêtre active (défaut)").tag(0)
+                Text("Écran principal").tag(-1)
                 ForEach(connectedScreenEntries, id: \.tag) { entry in
                     Text(entry.name).tag(entry.tag)
                 }
             }
             .labelsHidden()
-            .accessibilityLabel("Show on")
+            .accessibilityLabel("Afficher sur")
             .pickerStyle(.menu)
             .frame(maxWidth: 240)
         }
-        // Re-query NSScreen.screens whenever the display arrangement
-        // changes so newly-attached monitors appear in the menu without
-        // reopening Settings. screensVersion is just a cache-buster.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
             screensVersion &+= 1
         }
@@ -1200,221 +848,34 @@ struct GeneralSettingsView: View {
         }
     }
 
-    private var commandModeSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Toggle("Enable Edit Mode", isOn: Binding(
-                get: { appState.isCommandModeEnabled },
-                set: { newValue in
-                    _ = appState.setCommandModeEnabled(newValue)
-                }
-            ))
-
-            Text("Transform highlighted text with a spoken instruction instead of dictating over it.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Picker("Invocation Style", selection: Binding(
-                get: { appState.commandModeStyle },
-                set: { newValue in
-                    _ = appState.setCommandModeStyle(newValue)
-                }
-            )) {
-                ForEach(CommandModeStyle.allCases) { style in
-                    Text(style.title).tag(style)
-                }
-            }
-            .pickerStyle(.segmented)
-            .disabled(!appState.isCommandModeEnabled)
-
-            Group {
-                switch appState.commandModeStyle {
-                case .automatic:
-                    Text("If text is selected, your normal dictation shortcut transforms the selection instead of dictating over it.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                case .manual:
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Hold the extra modifier together with your normal dictation shortcut to transform selected text.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Picker("Extra Modifier", selection: Binding(
-                            get: { appState.commandModeManualModifier },
-                            set: { newValue in
-                                _ = appState.setCommandModeManualModifier(newValue)
-                            }
-                        )) {
-                            ForEach(CommandModeManualModifier.allCases) { modifier in
-                                Text(modifier.title).tag(modifier)
-                            }
-                        }
-                        .disabled(!appState.isCommandModeEnabled || appState.commandModeStyle != .manual)
-                    }
-                }
-            }
-            .opacity(appState.isCommandModeEnabled ? 1 : 0.5)
-
-            if let validationMessage = appState.commandModeManualModifierValidationMessage {
-                Label(validationMessage, systemImage: "xmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-        }
-    }
-
-    // MARK: Cleanup
-
-    private var cleanupSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Toggle("Preserve exact wording", isOn: $appState.preserveExactWording)
-
-            Text("When on, \(AppName.displayName) skips the LLM cleanup step and pastes the transcript verbatim — filler words, informal phrasing, and explicit language are all preserved. Voice macros and Edit Mode still run.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Text("If Output Language is set, the transcript is still translated into that language, but the translation is literal: no rewording, no filler removal, no reformatting.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
     // MARK: Clipboard
 
     private var clipboardSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Toggle("Preserve clipboard after paste", isOn: $appState.preserveClipboard)
+            Toggle("Préserver le presse-papiers après collage", isOn: $appState.preserveClipboard)
 
-            Text("\(AppName.displayName) will temporarily place the transcript on your clipboard to paste it, then restore whatever was there before. If you copy something else before the restore happens, \(AppName.displayName) leaves it alone.")
+            Text("Wisper place temporairement la transcription sur le presse-papiers pour coller votre texte, puis restaure immédiatement le contenu précédent.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             Divider()
                 .padding(.vertical, 2)
 
-            Toggle("Keep dictations in clipboard history", isOn: $appState.keepDictationInClipboardHistory)
+            Toggle("Exclure de l'historique du presse-papiers", isOn: Binding(
+                get: { !appState.keepDictationInClipboardHistory },
+                set: { appState.keepDictationInClipboardHistory = !$0 }
+            ))
 
-            Text("When on, your clipboard manager (Paste, Raycast, Maccy, etc.) records each dictation so you can find it in your recent history. When off, \(AppName.displayName) marks dictations transient and your clipboard manager skips them.")
+            Text("Empêche les gestionnaires de presse-papiers (Raycast, Maccy, Paste, etc.) d'accumuler vos dictées vocales.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             Divider()
                 .padding(.vertical, 2)
 
-            Toggle("Say \"press enter\" to submit after paste", isOn: $appState.isPressEnterVoiceCommandEnabled)
+            Toggle("Dire « press enter » pour valider automatiquement", isOn: $appState.isPressEnterVoiceCommandEnabled)
 
-            Text("When the transcription ends with \"press enter\", \(AppName.displayName) removes those words before cleanup, pastes the remaining transcript, then presses Return.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    // MARK: Microphone
-
-    private var microphoneSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Select which microphone to use for recording.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            VStack(spacing: 6) {
-                MicrophoneOptionRow(
-                    name: "System Default",
-                    isSelected: appState.selectedMicrophoneID == "default" || appState.selectedMicrophoneID.isEmpty,
-                    action: { appState.selectedMicrophoneID = "default" }
-                )
-                ForEach(appState.availableMicrophones) { device in
-                    MicrophoneOptionRow(
-                        name: device.name,
-                        isSelected: appState.selectedMicrophoneID == device.uid,
-                        action: { appState.selectedMicrophoneID = device.uid }
-                    )
-                }
-            }
-        }
-        .onAppear {
-            appState.refreshAvailableMicrophones()
-        }
-    }
-
-    // MARK: Sound Volume
-
-    private var soundVolumeSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Toggle("Play alert sounds", isOn: $appState.alertSoundsEnabled)
-
-            HStack(spacing: 12) {
-                Image(systemName: "speaker.fill")
-                    .foregroundStyle(.secondary)
-                    .font(.caption)
-                Slider(value: $appState.soundVolume, in: 0...1, step: 0.1)
-                Image(systemName: "speaker.wave.3.fill")
-                    .foregroundStyle(.secondary)
-                    .font(.caption)
-                Text("\(Int(appState.soundVolume * 100))%")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 36, alignment: .trailing)
-            }
-            .disabled(!appState.alertSoundsEnabled)
-            .opacity(appState.alertSoundsEnabled ? 1 : 0.5)
-
-            HStack(spacing: 8) {
-                Button("Preview") {
-                    let muted = SystemAudioStatus.isDefaultOutputMuted()
-                    let volume = SystemAudioStatus.defaultOutputVolume()
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        showMutedHint = muted || (volume ?? 1) < 0.10
-                    }
-                    appState.playAlertSound(named: "Tink")
-                }
-                .font(.caption)
-                .disabled(!appState.alertSoundsEnabled)
-
-                if showMutedHint {
-                    HStack(spacing: 4) {
-                        Image(systemName: "speaker.slash.fill")
-                            .foregroundStyle(.orange)
-                        Text("System volume is muted or very low. Unmute to hear the preview.")
-                            .foregroundStyle(.secondary)
-                    }
-                    .font(.caption)
-                    .transition(.opacity)
-                }
-            }
-        }
-        .onChange(of: appState.alertSoundsEnabled) { enabled in
-            if !enabled { showMutedHint = false }
-        }
-    }
-
-    // MARK: Custom Vocabulary
-
-    private func commitCustomVocabulary() {
-        let trimmed = customVocabularyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        if appState.customVocabulary != trimmed {
-            appState.customVocabulary = trimmed
-        }
-    }
-
-    private var vocabularySection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Words and phrases to preserve during post-processing.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            TextEditor(text: $customVocabularyInput)
-                .font(.system(.body, design: .monospaced))
-                .frame(minHeight: 80, maxHeight: 140)
-                .focused($customVocabularyFocused)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
-                )
-                .onChange(of: customVocabularyFocused) { focused in
-                    if !focused { commitCustomVocabulary() }
-                }
-
-            Text("Separate entries with commas, new lines, or semicolons.")
+            Text("Si la dictée se termine par « press enter », Wisper supprime ces mots et simule la touche Entrée après le collage.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -1436,7 +897,7 @@ struct GeneralSettingsView: View {
             )
 
             permissionRow(
-                title: "Accessibility",
+                title: "Accessibilité",
                 icon: "hand.raised.fill",
                 granted: appState.hasAccessibility,
                 action: {
@@ -1445,7 +906,7 @@ struct GeneralSettingsView: View {
             )
 
             permissionRow(
-                title: "Screen Recording",
+                title: "Enregistrement de l'écran",
                 icon: "camera.viewfinder",
                 granted: appState.hasScreenRecordingPermission,
                 action: {
@@ -1465,11 +926,11 @@ struct GeneralSettingsView: View {
             if granted {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
-                Text("Granted")
+                Text("Autorisé")
                     .font(.caption)
                     .foregroundStyle(.green)
             } else {
-                Button("Grant Access") {
+                Button("Autoriser l'accès") {
                     action()
                 }
                 .font(.caption)
@@ -1484,6 +945,909 @@ struct GeneralSettingsView: View {
         micPermissionGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
     }
 
+    // MARK: Updates
+
+    private var updatesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Vérifier automatiquement les mises à jour", isOn: Binding(
+                get: { updateManager.autoCheckEnabled },
+                set: { updateManager.autoCheckEnabled = $0 }
+            ))
+
+            HStack(spacing: 10) {
+                Button {
+                    Task {
+                        await updateManager.checkForUpdates(userInitiated: true)
+                    }
+                } label: {
+                    if updateManager.isChecking {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("Vérification en cours…")
+                        }
+                    } else {
+                        Text("Vérifier les mises à jour maintenant")
+                    }
+                }
+                .disabled(updateManager.isChecking)
+
+                if let date = updateManager.lastCheckDate {
+                    Text("Dernière vérification : \(date.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var buildInfoSection: some View {
+        HStack {
+            Text(buildDiagnosticsText)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            Button(copiedBuildInfo ? "Copié !" : "Copier les infos") {
+                copyBuildDiagnostics()
+            }
+            .font(.caption)
+        }
+    }
+
+    private func copyBuildDiagnostics() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(buildDiagnosticsText, forType: .string)
+        copiedBuildInfo = true
+
+        copiedBuildInfoResetWorkItem?.cancel()
+        let resetWorkItem = DispatchWorkItem {
+            copiedBuildInfo = false
+            copiedBuildInfoResetWorkItem = nil
+        }
+        copiedBuildInfoResetWorkItem = resetWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: resetWorkItem)
+    }
+}
+
+// MARK: - Shortcuts Settings
+
+struct ShortcutsSettingsView: View {
+    @EnvironmentObject var appState: AppState
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                SettingsCard("Dictée Vocale (Touche Parler)", icon: "keyboard.fill") {
+                    hotkeySection
+                }
+
+                SettingsCard("Réécriture de Texte Sélectionné", icon: "pencil.and.outline") {
+                    rewriteShortcutSection
+                }
+
+                SettingsCard("Mode Assistant IA", icon: "sparkles") {
+                    aiAssistantShortcutSection
+                }
+
+                SettingsCard("Gestion Audio pendant la dictée", icon: "speaker.slash.fill") {
+                    dictationAudioSection
+                }
+            }
+            .padding(24)
+        }
+    }
+
+    private var hotkeySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            DictationShortcutEditor { isCapturing in
+                if isCapturing {
+                    appState.suspendHotkeyMonitoringForShortcutCapture()
+                } else {
+                    appState.resumeHotkeyMonitoringAfterShortcutCapture()
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Délai de démarrage du raccourci")
+                        .font(.caption.weight(.semibold))
+                    Spacer()
+                    Text("\(appState.shortcutStartDelayMilliseconds) ms")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                Slider(
+                    value: $appState.shortcutStartDelay,
+                    in: 0...0.5,
+                    step: 0.025
+                )
+
+                Text("Délai appliqué avant le début de capture audio pour éviter les à-coups.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var rewriteShortcutSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Touche de Réécriture :")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text("Option (⌥ Gauche ou Droite)")
+                    .font(.caption.monospaced())
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.08)))
+            }
+
+            Text("Sélectionnez du texte dans n'importe quelle application (IDE, navigateur, messagerie) et appuyez une fois sur Option pour le corriger, ponctuer et reformuler avec l'IA.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var aiAssistantShortcutSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Toggle(
+                "Ouvrir l'Assistant IA par double-appui sur la touche Réécriture (Option)",
+                isOn: $appState.isDoubleTapAIModeEnabled
+            )
+            .toggleStyle(.switch)
+
+            Text("Appuyez rapidement deux fois de suite sur la touche Option pour ouvrir instantanément la fenêtre flottante de l'Assistant IA. Vous pouvez lui poser des questions au clavier, dicter votre demande à la voix ou capturer une zone de votre écran.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+            HStack {
+                Text("Tester l'accès :")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Button {
+                    AIAssistantWindowManager.shared.toggle(appState: appState)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "sparkles")
+                        Text("Ouvrir la fenêtre Assistant IA maintenant")
+                    }
+                    .font(.caption.weight(.medium))
+                }
+                .buttonStyle(.link)
+            }
+        }
+    }
+
+    private var dictationAudioSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(
+                "Couper le son système pendant la dictée",
+                isOn: $appState.dictationAudioInterruptionEnabled
+            )
+
+            Text("Wisper rétablit automatiquement le volume sonore initial dès la fin de votre dictée.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+// MARK: - AI Settings
+
+struct AISettingsView: View {
+    @EnvironmentObject var appState: AppState
+    @Environment(\.openURL) private var openURL
+
+    @State private var openRouterAPIKeyInput: String = ""
+    @State private var isValidatingOpenRouterKey = false
+    @State private var openRouterValidationError: String?
+    @State private var openRouterValidationSuccess = false
+
+    // Advanced provider
+    @State private var advancedProviderSettingsExpanded = false
+    @State private var apiKeyInput: String = ""
+    @State private var apiBaseURLInput: String = ""
+    @State private var transcriptionAPIURLInput: String = ""
+    @State private var transcriptionAPIKeyInput: String = ""
+    @State private var isValidatingKey = false
+    @State private var keyValidationError: String?
+    @State private var keyValidationSuccess = false
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                SettingsCard("Clé API OpenRouter", icon: "key.fill") {
+                    openRouterKeySection
+                }
+
+                SettingsCard("Mode Assistant IA", icon: "sparkles") {
+                    aiAssistantModelSection
+                }
+
+                SettingsCard("Réécriture & Post-traitement", icon: "wand.and.stars") {
+                    rewriteModelSection
+                }
+
+                SettingsCard("Assistant Visuel d'Écran (\"Où se trouve...\")", icon: "viewfinder") {
+                    visualPointerSection
+                }
+
+                SettingsCard("Mémoire Sémantique Locale (« Deuxième Cerveau »)", icon: "brain.head.profile") {
+                    semanticMemorySection
+                }
+
+                SettingsCard("Serveur OpenAI / Groq personnalisé (Optionnel)", icon: "server.rack") {
+                    advancedCustomProviderSection
+                }
+            }
+            .padding(24)
+        }
+        .onAppear {
+            openRouterAPIKeyInput = appState.openRouterAPIKey
+            apiKeyInput = appState.apiKey
+            apiBaseURLInput = appState.apiBaseURL
+            transcriptionAPIURLInput = appState.transcriptionAPIURL
+            transcriptionAPIKeyInput = appState.transcriptionAPIKey
+        }
+        .onChange(of: appState.openRouterAPIKey) { value in
+            if openRouterAPIKeyInput != value {
+                openRouterAPIKeyInput = value
+            }
+        }
+    }
+
+    // MARK: OpenRouter Key Section
+
+    private var openRouterKeySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Clé API OpenRouter (sk-or-v1-...)")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Button("Obtenir une clé sur openrouter.ai ↗") {
+                    if let url = URL(string: "https://openrouter.ai/keys") {
+                        openURL(url)
+                    }
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+            }
+
+            HStack {
+                SecureField("sk-or-v1-...", text: $openRouterAPIKeyInput)
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: openRouterAPIKeyInput) { newValue in
+                        appState.openRouterAPIKey = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        openRouterValidationSuccess = false
+                        openRouterValidationError = nil
+                    }
+
+                Button(isValidatingOpenRouterKey ? "Test en cours…" : "Valider") {
+                    testOpenRouterConnection()
+                }
+                .disabled(openRouterAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isValidatingOpenRouterKey)
+            }
+
+            if let error = openRouterValidationError {
+                Label(error, systemImage: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            } else if openRouterValidationSuccess {
+                Label("Connexion OpenRouter réussie !", systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            }
+
+            Text("Wisper utilise OpenRouter pour acheminer vos requêtes d'IA en toute flexibilité vers les meilleurs modèles mondiaux (OpenAI, Anthropic, Google Gemini, Mistral).")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func testOpenRouterConnection() {
+        let key = openRouterAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return }
+
+        isValidatingOpenRouterKey = true
+        openRouterValidationError = nil
+        openRouterValidationSuccess = false
+
+        let model = appState.openRouterModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? AppState.defaultOpenRouterModel : appState.openRouterModel
+
+        Task {
+            do {
+                _ = try await AIAssistantService.shared.sendQuery(
+                    prompt: "Ping",
+                    model: model,
+                    apiKey: key
+                )
+                await MainActor.run {
+                    self.isValidatingOpenRouterKey = false
+                    self.openRouterValidationSuccess = true
+                }
+            } catch {
+                await MainActor.run {
+                    self.isValidatingOpenRouterKey = false
+                    self.openRouterValidationError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    // MARK: AI Assistant Model Section
+
+    private var aiAssistantModelSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Picker("Modèle par défaut :", selection: $appState.aiAssistantModel) {
+                ForEach(AIAssistantModel.allCases) { model in
+                    Text(model.displayName).tag(model.rawValue)
+                }
+            }
+            .pickerStyle(.menu)
+
+            Text("Ce modèle est utilisé par la fenêtre dédiée de l'Assistant IA pour répondre à vos questions et analyser vos captures d'écran.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: Rewrite Model Section
+
+    private var rewriteModelSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Picker("Modèle de réécriture :", selection: $appState.openRouterModel) {
+                Text("Gemini 2.5 Flash (Ultra-rapide, Recommandé)").tag("google/gemini-2.5-flash")
+                Text("Gemini 2.5 Flash Lite (0.4s)").tag("google/gemini-2.5-flash-lite")
+                Text("Claude 3.5 Sonnet").tag("anthropic/claude-3.5-sonnet")
+                Text("Nvidia Nemotron 3 Super 120B Free").tag("nvidia/nemotron-3-super-120b-a12b:free")
+                Text("Mistral Small 24B Free (Français)").tag("mistralai/mistral-small-24b-instruct-2501:free")
+            }
+            .pickerStyle(.menu)
+
+            HStack {
+                Text("Identifiant modèle :")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("google/gemini-2.5-flash", text: $appState.openRouterModel)
+                    .font(.caption.monospaced())
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Garde-fous actifs :")
+                    .font(.caption.weight(.semibold))
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.caption2)
+                    Text("Règle absolue anti-réponse : les questions sélectionnées sont corrigées, jamais répondues.")
+                        .font(.caption)
+                }
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.caption2)
+                    Text("Respect du ton naturel : pas de transformation en formulation pompeuse ou diplomatique.")
+                        .font(.caption)
+                }
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.caption2)
+                    Text("Vocabulaire dev & Markdown automatique (backticks, listes).")
+                        .font(.caption)
+                }
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+        }
+    }
+
+    // MARK: Visual Pointer Section
+
+    private var visualPointerSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Assistant d'écran visuel (\"Où se trouve...\")", isOn: $appState.isVisualPointerEnabled)
+
+            Text("Quand cette option est activée, si vous demandez oralement \"Où se trouve le bouton X ?\" ou \"Où est Y ?\", Wisper repère l'élément sur votre écran avec Gemini 2.5 Flash et l'entoure d'un halo radar lumineux.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Semantic Memory Section
+
+    @AppStorage("semantic_memory_enabled") private var semanticMemoryEnabled: Bool = true
+    @AppStorage("semantic_memory_capture_clipboard") private var captureClipboardEnabled: Bool = false
+    @AppStorage("semantic_memory_capture_terminal") private var captureTerminalEnabled: Bool = false
+    @AppStorage("semantic_memory_retention_days") private var retentionDays: Int = 7
+    @State private var memoryItemCount: Int = 0
+    @State private var isShowingClearConfirmation = false
+    @State private var manualNoteInput = ""
+
+    private var semanticMemorySection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Toggle("Activer la mémoire sémantique locale", isOn: $semanticMemoryEnabled)
+
+            Text("Mémorise localement vos dictées et réécritures avec les embeddings vectoriels natifs d'Apple. 100% privé, sans aucun envoi vers des serveurs externes. La capture du presse-papiers et de l'historique du Terminal est désactivée par défaut et reste optionnelle.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if semanticMemoryEnabled {
+                Divider()
+
+                Toggle("Capturer l'historique du presse-papier", isOn: $captureClipboardEnabled)
+
+                Text("Mémorise automatiquement vos copier-coller de texte. Les gestionnaires de mots de passe (1Password, Bitwarden, Trousseaux) et les clés privées sont strictement ignorés.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Indexer les commandes du Terminal (~/.zsh_history)", isOn: $captureTerminalEnabled)
+                    .onChange(of: captureTerminalEnabled) { enabled in
+                        if enabled {
+                            SemanticMemoryService.shared.syncTerminalHistory()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                memoryItemCount = SemanticMemoryStore.shared.count()
+                            }
+                        }
+                    }
+
+                Text("Lit uniquement votre fichier d'historique de shell local (~/.zsh_history). Zéro enregistreur de frappe (aucun keylogger) et les mots de passe/tokens sont strictement filtrés. Désactivé par défaut.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Ajouter une note manuelle")
+                        .font(.headline)
+
+                    HStack {
+                        TextField("Ex. : commande de déploiement du projet X…", text: $manualNoteInput)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit {
+                                addManualNoteFromInput()
+                            }
+                        Button("Ajouter") {
+                            addManualNoteFromInput()
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(manualNoteInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+
+                    Text("Les notes que vous saisissez ici sont conservées en mémoire et retrouvables par recherche vocale (« Wisper, retrouve... ») et par l'Assistant IA.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack {
+                    Text("Durée de conservation")
+                        .font(.body)
+                    Spacer()
+                    Picker("", selection: $retentionDays) {
+                        Text("7 jours").tag(7)
+                        Text("30 jours").tag(30)
+                        Text("Illimitée").tag(-1)
+                    }
+                    .pickerStyle(.menu)
+                    .frame(width: 130)
+                }
+
+                HStack {
+                    HStack(spacing: 6) {
+                        Image(systemName: "internaldrive")
+                            .foregroundStyle(.secondary)
+                        Text("\(memoryItemCount) souvenir\(memoryItemCount > 1 ? "s" : "") en mémoire")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Button {
+                        SemanticMemoryService.shared.syncTerminalHistory()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            memoryItemCount = SemanticMemoryStore.shared.count()
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "terminal")
+                            Text("Indexer le Terminal")
+                        }
+                        .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button(role: .destructive) {
+                        isShowingClearConfirmation = true
+                    } label: {
+                        Text("Vider la mémoire")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .confirmationDialog(
+                        "Effacer tous les souvenirs ?",
+                        isPresented: $isShowingClearConfirmation,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Tout supprimer", role: .destructive) {
+                            SemanticMemoryStore.shared.clearAll()
+                            memoryItemCount = 0
+                        }
+                        Button("Annuler", role: .cancel) {}
+                    } message: {
+                        Text("Cette action supprimera définitivement tous les éléments indexés dans votre base de mémoire locale.")
+                    }
+                }
+                .padding(.top, 4)
+
+                HStack(spacing: 8) {
+                    Image(systemName: "lightbulb.fill")
+                        .font(.caption)
+                        .foregroundStyle(.yellow)
+                    Text("Astuce : dites oralement « Wisper, retrouve... » ou « C'était quoi... » pour rechercher un souvenir instantanément.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.04)))
+            }
+        }
+        .onAppear {
+            memoryItemCount = SemanticMemoryStore.shared.count()
+        }
+    }
+
+    private func addManualNoteFromInput() {
+        let note = manualNoteInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !note.isEmpty else { return }
+        if SemanticMemoryService.shared.addManualNote(note) {
+            manualNoteInput = ""
+            memoryItemCount = SemanticMemoryStore.shared.count()
+        }
+    }
+
+    // MARK: Advanced Custom Provider Section
+
+    private var advancedCustomProviderSection: some View {
+        DisclosureGroup(isExpanded: $advancedProviderSettingsExpanded) {
+            VStack(alignment: .leading, spacing: 12) {
+                Divider()
+                Text("Cette section est optionnelle. Wisper utilise par défaut Whisper Local (pour l'audio) et OpenRouter (pour l'IA). Si vous disposez d'un serveur local ou d'un compte OpenAI / Groq dédié, vous pouvez configurer vos clés et URL ici.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    SecureField("Clé API OpenAI / Groq (Optionnel)", text: $apiKeyInput)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .disabled(isValidatingKey)
+                        .onChange(of: apiKeyInput) { _ in
+                            keyValidationError = nil
+                            keyValidationSuccess = false
+                        }
+
+                    Button(isValidatingKey ? "Validation…" : "Enregistrer") {
+                        validateAndSaveKey()
+                    }
+                    .disabled(apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isValidatingKey)
+                }
+
+                if let error = keyValidationError {
+                    Label(error, systemImage: "xmark.circle.fill")
+                        .foregroundStyle(.red)
+                        .font(.caption)
+                } else if keyValidationSuccess {
+                    Label("Clé API enregistrée", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.caption)
+                }
+
+                ProviderSettingsFields(
+                    apiBaseURLInput: $apiBaseURLInput,
+                    transcriptionAPIURLInput: $transcriptionAPIURLInput,
+                    transcriptionAPIKeyInput: $transcriptionAPIKeyInput,
+                    showsModelDescription: false
+                )
+            }
+            .padding(.top, 4)
+        } label: {
+            HStack {
+                Text("Configuration avancée de serveur tiers (Optionnel)")
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                advancedProviderSettingsExpanded.toggle()
+            }
+        }
+    }
+
+    private func validateAndSaveKey() {
+        let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseURL = apiBaseURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        isValidatingKey = true
+        keyValidationError = nil
+        keyValidationSuccess = false
+
+        Task {
+            let valid = await TranscriptionService.validateAPIKey(
+                key,
+                baseURL: baseURL.isEmpty ? AppState.defaultAPIBaseURL : baseURL
+            )
+            await MainActor.run {
+                isValidatingKey = false
+                if valid {
+                    appState.apiKey = key
+                    keyValidationSuccess = true
+                } else {
+                    keyValidationError = "Échec de validation. Vérifiez votre clé et URL, puis réessayez."
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Audio Settings
+
+struct AudioSettingsView: View {
+    @EnvironmentObject var appState: AppState
+    @AppStorage("haptic_feedback_enabled") private var hapticFeedbackEnabled = true
+    @State private var customVocabularyInput: String = ""
+    @FocusState private var customVocabularyFocused: Bool
+    @State private var showMutedHint = false
+
+    private static let outputLanguageOptions = [
+        "",
+        "English",
+        "Chinese (Simplified)",
+        "Chinese (Traditional)",
+        "Spanish",
+        "French",
+        "Japanese",
+        "Korean",
+        "German",
+        "Portuguese",
+    ]
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                SettingsCard("Source Microphone", icon: "mic.fill") {
+                    microphoneSection
+                    Divider()
+                    soundVolumeSection
+                }
+
+                SettingsCard("Sensations Tactiles (Trackpad Force Touch)", icon: "hand.tap.fill") {
+                    hapticFeedbackSection
+                }
+
+                SettingsCard("Filtre Anti-Bruit & Anti-Silence", icon: "waveform.badge.minus") {
+                    antiSilenceFilterSection
+                }
+
+                SettingsCard("Langue de Dictée", icon: "globe") {
+                    outputLanguageSection
+                }
+
+                SettingsCard("Vocabulaire Personnalisé", icon: "character.book.closed") {
+                    vocabularySection
+                }
+
+                SettingsCard("Moteur Whisper Local (Metal GPU)", icon: "cpu") {
+                    whisperLocalStatusSection
+                }
+            }
+            .padding(24)
+        }
+        .onAppear {
+            customVocabularyInput = appState.customVocabulary
+            appState.refreshAvailableMicrophones()
+        }
+        .onDisappear {
+            commitCustomVocabulary()
+        }
+    }
+
+    // MARK: Microphone Section
+
+    private var microphoneSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Sélectionnez le microphone utilisé pour la dictée vocale.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 6) {
+                MicrophoneOptionRow(
+                    name: "Par défaut du système",
+                    isSelected: appState.selectedMicrophoneID == "default" || appState.selectedMicrophoneID.isEmpty,
+                    action: { appState.selectedMicrophoneID = "default" }
+                )
+                ForEach(appState.availableMicrophones) { device in
+                    MicrophoneOptionRow(
+                        name: device.name,
+                        isSelected: appState.selectedMicrophoneID == device.uid,
+                        action: { appState.selectedMicrophoneID = device.uid }
+                    )
+                }
+            }
+        }
+    }
+
+    // MARK: Sound Volume Section
+
+    private var soundVolumeSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Émettre les sons de confirmation (bip, cloche)", isOn: $appState.alertSoundsEnabled)
+
+            HStack(spacing: 12) {
+                Image(systemName: "speaker.fill")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+                Slider(value: $appState.soundVolume, in: 0...1, step: 0.1)
+                Image(systemName: "speaker.wave.3.fill")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+                Text("\(Int(appState.soundVolume * 100))%")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, alignment: .trailing)
+            }
+            .disabled(!appState.alertSoundsEnabled)
+            .opacity(appState.alertSoundsEnabled ? 1 : 0.5)
+
+            HStack(spacing: 8) {
+                Button("Tester le son") {
+                    let muted = SystemAudioStatus.isDefaultOutputMuted()
+                    let volume = SystemAudioStatus.defaultOutputVolume()
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showMutedHint = muted || (volume ?? 1) < 0.10
+                    }
+                    appState.playAlertSound(named: "Tink")
+                }
+                .font(.caption)
+                .disabled(!appState.alertSoundsEnabled)
+
+                if showMutedHint {
+                    HStack(spacing: 4) {
+                        Image(systemName: "speaker.slash.fill")
+                            .foregroundStyle(.orange)
+                        Text("Le volume système est bas ou coupé.")
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.caption)
+                }
+            }
+        }
+    }
+
+    // MARK: Haptic Feedback Section
+
+    private var hapticFeedbackSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Activer les retours haptiques sur le trackpad", isOn: $hapticFeedbackEnabled)
+
+            Text("Produit un clic tactile feutré au début de la parole, à l'arrêt de l'enregistrement et lors du collage du texte.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Button("Tester le clic Force Touch") {
+                HapticFeedbackService.shared.trigger(.success)
+            }
+            .font(.caption)
+            .disabled(!hapticFeedbackEnabled)
+        }
+    }
+
+    // MARK: Anti-Silence Filter Section
+
+    private var antiSilenceFilterSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.shield.fill")
+                    .foregroundStyle(.green)
+                Text("Filtre Anti-Bruit & Anti-Silence Actif")
+                    .font(.caption.weight(.semibold))
+            }
+
+            Text("Wisper analyse en temps réel l'énergie vocale. Si vous effleurez la touche par inadvertance ou relâchez la touche sans avoir parlé, la dictée est annulée silencieusement sans bruit parasite ni collage indésirable.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: Output Language Section
+
+    private var outputLanguageSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("Langue de transcription :", selection: $appState.outputLanguage) {
+                Text("Identique à la langue parlée").tag("")
+                ForEach(Self.outputLanguageOptions.dropFirst(), id: \.self) { lang in
+                    Text(lang).tag(lang)
+                }
+            }
+            .pickerStyle(.menu)
+
+            Text("Laissez sur « Identique » pour transcrire automatiquement le français ou l'anglais tel que prononcé.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: Vocabulary Section
+
+    private var vocabularySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Termes techniques, noms propres, acronymes ou abréviations à préserver.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            TextEditor(text: $customVocabularyInput)
+                .font(.system(.body, design: .monospaced))
+                .frame(minHeight: 80, maxHeight: 120)
+                .focused($customVocabularyFocused)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                )
+                .onChange(of: customVocabularyFocused) { focused in
+                    if !focused { commitCustomVocabulary() }
+                }
+
+            Text("Séparez les mots par des virgules ou des retours à la ligne.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func commitCustomVocabulary() {
+        let trimmed = customVocabularyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if appState.customVocabulary != trimmed {
+            appState.customVocabulary = trimmed
+        }
+    }
+
+    // MARK: Whisper Local Status Section
+
+    private var whisperLocalStatusSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Statut du moteur STT :")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                HStack(spacing: 4) {
+                    Circle().fill(Color.green).frame(width: 8, height: 8)
+                    Text("whisper-server Actif (Port 8085, GPU Metal M4)")
+                        .foregroundStyle(.green)
+                        .font(.caption.weight(.medium))
+                }
+            }
+
+            Text("Modèle : ggml-large-v3-turbo.bin (800M paramètres, ~1.2s de latence, 100% sur l'accélérateur Metal Apple Silicon). Vos enregistrements audio restent sur votre machine et ne sont jamais transmis sur internet.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Button("Redémarrer le moteur Whisper") {
+                    Task {
+                        _ = await LocalInferenceService.shared.restartServer()
+                    }
+                }
+                .font(.caption)
+
+                Spacer()
+
+                Button("Ouvrir le dossier des modèles ↗") {
+                    NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: LocalInferenceService.modelsDirectory.path)
+                }
+                .font(.caption)
+            }
+            .padding(.top, 4)
+        }
+    }
 }
 
 // MARK: - Microphone Option Row
@@ -1554,9 +1918,13 @@ struct PromptsSettingsView: View {
             .padding(24)
         }
         .onAppear {
-            customSystemPromptInput = appState.customSystemPrompt.isEmpty
-                ? PostProcessingService.defaultSystemPrompt
-                : appState.customSystemPrompt
+            if appState.customSystemPrompt.isEmpty {
+                customSystemPromptInput = (appState.transcriptionModel == "whisper-local")
+                    ? PostProcessingService.localFastSystemPrompt
+                    : PostProcessingService.defaultSystemPrompt
+            } else {
+                customSystemPromptInput = appState.customSystemPrompt
+            }
             customContextPromptInput = appState.customContextPrompt.isEmpty
                 ? AppContextService.defaultContextPrompt
                 : appState.customContextPrompt
@@ -1570,7 +1938,8 @@ struct PromptsSettingsView: View {
     private func commitCustomSystemPrompt() {
         let trimmed = customSystemPromptInput.trimmingCharacters(in: .whitespacesAndNewlines)
         let defaultTrimmed = PostProcessingService.defaultSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed == defaultTrimmed || trimmed.isEmpty {
+        let localTrimmed = PostProcessingService.localFastSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed == defaultTrimmed || trimmed == localTrimmed || trimmed.isEmpty {
             if !appState.customSystemPrompt.isEmpty {
                 appState.customSystemPrompt = ""
                 appState.customSystemPromptLastModified = ""
@@ -1666,18 +2035,25 @@ struct PromptsSettingsView: View {
 
             HStack {
                 if isCustom {
-                    Label("Using custom prompt", systemImage: "pencil")
+                    Label("Prompt personnalisé actif", systemImage: "pencil")
                         .font(.caption)
                         .foregroundStyle(.blue)
                 } else {
-                    Label("Using default", systemImage: "checkmark.circle")
+                    Label(appState.transcriptionModel == "whisper-local" ? "Prompt français M4 actif" : "Prompt par défaut actif", systemImage: "checkmark.circle")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button("Passer au prompt français M4") {
+                    customSystemPromptInput = PostProcessingService.localFastSystemPrompt
+                    appState.customSystemPrompt = PostProcessingService.localFastSystemPrompt
+                    appState.customSystemPromptLastModified = iso8601DayFormatter.string(from: Date())
+                }
+                .font(.caption)
+
                 if isCustom {
-                    Button("Reset to Default") {
-                        customSystemPromptInput = PostProcessingService.defaultSystemPrompt
+                    Button("Réinitialiser") {
+                        customSystemPromptInput = (appState.transcriptionModel == "whisper-local") ? PostProcessingService.localFastSystemPrompt : PostProcessingService.defaultSystemPrompt
                         appState.customSystemPrompt = ""
                         appState.customSystemPromptLastModified = ""
                     }
@@ -1767,7 +2143,7 @@ struct PromptsSettingsView: View {
             )
             .toggleStyle(.switch)
 
-            Text("When enabled, FreeFlow retries or falls back to the literal transcript if post-processing looks like it answered the dictated text instead of cleaning it.")
+            Text("When enabled, Wisper retries or falls back to the literal transcript if post-processing looks like it answered the dictated text instead of cleaning it.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -1793,7 +2169,7 @@ struct PromptsSettingsView: View {
 
         let context = AppContext(
             appName: "\(AppName.displayName) Settings",
-            bundleIdentifier: "com.zachlatta.freeflow",
+            bundleIdentifier: "com.williamh07.wisper",
             windowTitle: "System Prompt Test",
             selectedText: nil,
             currentActivity: "User is testing the system prompt in \(AppName.displayName) settings.",

@@ -61,15 +61,16 @@ extension ShortcutBinding {
         let label = Self.displayLabel(for: event.keyCode, event: event)
         guard !label.isEmpty else { return nil }
 
-        let exactModifierKeyCodes = Self.normalizedExactModifierKeyCodes(pressedModifierKeyCodes)
+        let modifiers = Self.modifiers(for: pressedModifierKeyCodes)
+        let exactModifierKeyCodes = Self.exactModifierKeyCodesPreservingSides(for: modifiers)
 
         return ShortcutBinding(
             keyCode: event.keyCode,
             keyDisplay: label,
-            modifiers: Self.modifiers(for: pressedModifierKeyCodes),
+            modifiers: modifiers,
             kind: .key,
             preset: nil,
-            exactModifierKeyCodes: exactModifierKeyCodes
+            exactModifierKeyCodes: exactModifierKeyCodes.isEmpty ? nil : exactModifierKeyCodes
         )
     }
 

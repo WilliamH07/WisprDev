@@ -9,6 +9,8 @@ public struct ModelConfig {
 
 public struct ModelConfiguration {
     public static let llmModels = [
+        "llama3.2:3b",
+        "qwen2.5:3b",
         "openai/gpt-oss-20b",
         "openai/gpt-oss-120b",
         "openai/gpt-oss-safeguard-20b",
@@ -25,6 +27,7 @@ public struct ModelConfiguration {
     ]
 
     public static let transcriptionModels = [
+        "whisper-local",
         "whisper-large-v3",
         "whisper-large-v3-turbo"
     ]
@@ -45,6 +48,13 @@ public struct ModelConfiguration {
                 reasoningEffort: "low",
                 includeReasoning: false,
                 shouldStripThinkTags: false
+            )
+        } else if cleanModel.contains("nemotron") {
+            return ModelConfig(
+                maxCompletionTokens: 512,
+                reasoningEffort: "none",
+                includeReasoning: false,
+                shouldStripThinkTags: true
             )
         } else if cleanModel == "openai/gpt-oss-120b" {
             return ModelConfig(
@@ -158,6 +168,13 @@ public struct ModelConfiguration {
                 reasoningEffort: nil,
                 includeReasoning: nil,
                 shouldStripThinkTags: false
+            )
+        } else if cleanModel.contains("nemotron") || cleanModel.contains("deepseek") || cleanModel.contains("r1") {
+            return ModelConfig(
+                maxCompletionTokens: nil,
+                reasoningEffort: nil,
+                includeReasoning: nil,
+                shouldStripThinkTags: true
             )
         }
         

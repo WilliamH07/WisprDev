@@ -45,6 +45,23 @@ actor LLMCooldownManager {
         return false
     }
 
+    /// Returns the remaining duration in seconds if the model is currently in cooldown, or nil otherwise.
+    func cooldownRemainingSeconds(for model: String) -> TimeInterval? {
+        let now = Date()
+
+        if let until = cooldowns[model] {
+            if now < until { return until.timeIntervalSince(now) }
+            cooldowns.removeValue(forKey: model)
+        }
+
+        if let until = persistedExpiry(for: model) {
+            if now < until { return until.timeIntervalSince(now) }
+            clearPersistedExpiry(for: model)
+        }
+
+        return nil
+    }
+
     /// Registers a cooldown for a model using the retry-after duration from the API 429 response.
     /// Minute-level durations stay in memory; daily-level durations are also written to UserDefaults.
     /// Pass `persist: true` for a daily-limit signal (the RPD reset header) so a daily quota that

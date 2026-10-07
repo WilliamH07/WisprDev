@@ -1,44 +1,44 @@
 <p align="center">
-  <img src="Resources/AppIcon-Source.png" width="128" height="128" alt="FreeFlow icon">
+  <img src="Resources/AppIcon-Source.png" width="128" height="128" alt="Wisper icon">
 </p>
 
-<h1 align="center">FreeFlow</h1>
+<h1 align="center">Wisper</h1>
 
 <p align="center">
   Free and open source alternative to <a href="https://wisprflow.ai">Wispr Flow</a>, <a href="https://superwhisper.com">Superwhisper</a>, and <a href="https://monologue.to">Monologue</a>.
 </p>
 
 <p align="center">
-  <a href="https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow.dmg"><b>⬇ Download FreeFlow.dmg</b></a><br>
+  <a href="https://github.com/WilliamH07/Wisper/releases/latest/download/Wisper.dmg"><b>⬇ Download Wisper.dmg</b></a><br>
   <sub>Works on all Macs (Apple Silicon + Intel)</sub>
 </p>
 
 ---
 
 <p align="center">
-  <img src="Resources/demo.gif" alt="FreeFlow demo" width="600">
+  <img src="Resources/demo.gif" alt="Wisper demo" width="600">
 </p>
 
 <p align="center">
-  <i>Thank you to <a href="https://github.com/marcbodea">@marcbodea</a> for maintaining FreeFlow!</i>
+  <i>Developed and maintained by William HANCZYK (<a href="https://github.com/WilliamH07">@WilliamH07</a>)</i>
 </p>
 
 ## Overview
 
-FreeFlow is a free Mac dictation app inspired by [Wispr Flow](https://wisprflow.ai/), [Superwhisper](https://superwhisper.com/), and [Monologue](https://www.monologue.to/). It gives you fast AI transcription, context-aware cleanup, and voice-driven text editing without a monthly subscription.
+Wisper is a free Mac dictation app inspired by [Wispr Flow](https://wisprflow.ai/), [Superwhisper](https://superwhisper.com/), and [Monologue](https://www.monologue.to/). It gives you fast AI transcription, context-aware cleanup, and voice-driven text editing without a monthly subscription.
 
 ## Quick Start
 
-1. Download the app from above or [click here](https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow.dmg)
-2. Get a free Groq API key from [groq.com](https://groq.com/)
+1. Download the app from above or [click here](https://github.com/WilliamH07/Wisper/releases/latest/download/Wisper.dmg)
+2. Get a free Groq or OpenRouter API key
 3. Hold `Fn` to talk, or tap `Command-Fn` to start and stop dictation, and have whatever you say pasted into the current text field
 
 ## Features
 
 - **Custom shortcuts:** Customize both hold-to-talk and toggle dictation shortcuts. If your toggle shortcut extends your hold shortcut, you can start in hold mode and press the extra modifier keys to latch into tap mode without stopping the recording.
-- **Context-aware cleanup:** FreeFlow can read nearby app context so names, terms, and phrases are spelled correctly when you dictate into email, terminals, docs, and other apps.
-- **Custom vocabulary:** Add names, jargon, and project-specific words that FreeFlow should preserve during cleanup.
-- **OpenAI-compatible providers:** Use Groq by default, or configure a custom model and API URL in settings.
+- **Context-aware cleanup:** Wisper can read nearby app context so names, terms, and phrases are spelled correctly when you dictate into email, terminals, docs, and other apps.
+- **Custom vocabulary:** Add names, jargon, and project-specific words that Wisper should preserve during cleanup.
+- **OpenAI-compatible providers:** Use Groq or OpenRouter by default, or configure a custom model and API URL in settings.
 
 ## Edit Mode
 
@@ -46,7 +46,7 @@ Edit Mode lets you highlight existing text and transform it with a spoken instru
 
 ## Privacy
 
-There is no FreeFlow server, so FreeFlow does not store or retain your data. The only information that leaves your computer are API calls to your configured transcription and LLM provider.
+There is no Wisper server, so Wisper does not store or retain your data. The only information that leaves your computer are API calls to your configured transcription and LLM provider.
 
 ## Custom Cleanup
 
@@ -78,19 +78,19 @@ Then your response would be ONLY the cleaned up text, so here your response is O
 
 ## Using a Local Model
 
-FreeFlow can use OpenAI-compatible local or self-hosted providers instead of Groq. In settings, configure the API base URL and model IDs for your local LLM provider, such as Ollama, LM Studio, or another OpenAI-compatible server. If your transcription backend uses a different endpoint from your LLM backend, set the transcription API URL separately.
+Wisper can use OpenAI-compatible local or self-hosted providers instead of Groq. In settings, configure the API base URL and model IDs for your local LLM provider, such as Ollama, LM Studio, or another OpenAI-compatible server. If your transcription backend uses a different endpoint from your LLM backend, set the transcription API URL separately.
 
 Local models are often slower than hosted providers, especially on cold start, long recordings, or busy hardware.
 
 <details>
   <summary>Configure longer timeouts for local models</summary>
 
-  FreeFlow keeps the default network timeout at 20 seconds, but you can extend it with macOS defaults:
+  Wisper keeps the default network timeout at 20 seconds, but you can extend it with macOS defaults:
 
 ```bash
-defaults write com.zachlatta.freeflow transcription_timeout_seconds -float 120
-defaults write com.zachlatta.freeflow post_processing_timeout_seconds -float 120
-defaults write com.zachlatta.freeflow context_request_timeout_seconds -float 120
+defaults write com.williamh07.wisper transcription_timeout_seconds -float 120
+defaults write com.williamh07.wisper post_processing_timeout_seconds -float 120
+defaults write com.williamh07.wisper context_request_timeout_seconds -float 120
 ```
 
 The timeout keys are:
@@ -102,13 +102,19 @@ The timeout keys are:
 Only positive values are used. Remove a custom timeout to return to the 20-second default:
 
 ```bash
-defaults delete com.zachlatta.freeflow transcription_timeout_seconds
-defaults delete com.zachlatta.freeflow post_processing_timeout_seconds
-defaults delete com.zachlatta.freeflow context_request_timeout_seconds
+defaults delete com.williamh07.wisper transcription_timeout_seconds
+defaults delete com.williamh07.wisper post_processing_timeout_seconds
+defaults delete com.williamh07.wisper context_request_timeout_seconds
 ```
 
 </details>
 
+## Origin and credits
+
+Wisper is a modified fork of [FreeFlow](https://github.com/zachlatta/freeflow) by [Zach Latta](https://github.com/zachlatta) and its contributors, released under the MIT license. The original copyright notice is kept in [LICENSE](LICENSE). Many thanks to the original author and to [@marcbodea](https://github.com/marcbodea) for maintaining FreeFlow.
+
+Changes in this fork: renamed app and bundle identifier, semantic memory, AI assistant window, local inference service and a redesigned interface.
+
 ## License
 
-Licensed under the MIT license.
+Licensed under the MIT license. Original work Copyright (c) 2026 Zach Latta; modifications Copyright (c) 2026 William HANCZYK.

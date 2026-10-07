@@ -1,7 +1,8 @@
 import Cocoa
 import os.log
 
-private let shortcutLog = OSLog(subsystem: "com.zachlatta.freeflow", category: "Shortcuts")
+private let shortcutLog = OSLog(subsystem: "com.williamh07.wisper", category: "Shortcuts")
+private let recordingLog = OSLog(subsystem: "com.williamh07.wisper", category: "Recording")
 
 enum GlobalShortcutBackendError: LocalizedError {
     case eventTapUnavailable
@@ -21,9 +22,14 @@ final class GlobalShortcutBackend {
     private var eventTap: CFMachPort?
     private var eventTapRunLoopSource: CFRunLoopSource?
     private var fnKeyIsDown = false
+    private var pressedModifierKeyCodes: Set<UInt16> = []
 
     var onInputEvent: ((ShortcutInputEvent) -> ShortcutConsumeDecision)?
     var onEscapeKeyPressed: (() -> Bool)?
+
+    var isRunning: Bool {
+        eventTap != nil
+    }
 
     func start() throws {
         stop()
@@ -81,6 +87,7 @@ final class GlobalShortcutBackend {
 
         eventTap = tap
         eventTapRunLoopSource = source
+        os_log(.info, log: recordingLog, "GlobalShortcutBackend: Event tap installed successfully")
     }
 
     private func tearDownEventTap() {
@@ -96,6 +103,7 @@ final class GlobalShortcutBackend {
 
     private func notifyBackendReset() {
         fnKeyIsDown = false
+        pressedModifierKeyCodes.removeAll()
         _ = onInputEvent?(.backendReset)
     }
 
@@ -134,14 +142,25 @@ final class GlobalShortcutBackend {
     }
 
     private func handleFlagsChanged(_ event: NSEvent) -> Bool {
-        guard ShortcutBinding.modifierKeyCodes.contains(event.keyCode),
-              let isDown = ModifierKeyEventState.isKeyDown(for: event) else {
+        guard ShortcutBinding.modifierKeyCodes.contains(event.keyCode) else {
             return false
+        }
+        guard let isDown = ModifierKeyEventState.isKeyDown(for: event) else {
+            os_log(.info, log: recordingLog, "flagsChanged: keyCode=%d could not determine isDown, flags=0x%lx", event.keyCode, event.modifierFlags.rawValue)
+            return false
+        }
+
+        if isDown {
+            pressedModifierKeyCodes.insert(event.keyCode)
+        } else {
+            pressedModifierKeyCodes.remove(event.keyCode)
         }
 
         if event.keyCode == ModifierKeyEventState.fnKeyCode {
             fnKeyIsDown = isDown
         }
+
+        os_log(.info, log: recordingLog, "flagsChanged: keyCode=%d isDown=%d pressedModifiers=%{public}@", event.keyCode, isDown ? 1 : 0, String(describing: pressedModifierKeyCodes))
 
         return onInputEvent?(.modifierChanged(keyCode: event.keyCode, isDown: isDown)) == .consume
     }
@@ -153,26 +172,29 @@ final class GlobalShortcutBackend {
         }
 
         guard !ShortcutBinding.modifierKeyCodes.contains(event.keyCode) else { return false }
-        let snapshotDecision = onInputEvent?(
-            .modifierSnapshot(ModifierKeyEventState.pressedModifierKeyCodes(
-                for: event,
-                trustedFunctionKeyIsDown: fnKeyIsDown
-            ))
-        ) ?? .passthrough
+        let snapshotModifiers = ModifierKeyEventState.pressedModifierKeyCodes(
+            for: event,
+            trustedFunctionKeyIsDown: fnKeyIsDown,
+            currentlyPressedKeyCodes: pressedModifierKeyCodes
+        )
+        pressedModifierKeyCodes = snapshotModifiers
+        let snapshotDecision = onInputEvent?(.modifierSnapshot(snapshotModifiers)) ?? .passthrough
         let keyDecision = onInputEvent?(
             .keyChanged(keyCode: event.keyCode, isDown: true, isRepeat: event.isARepeat)
         ) ?? .passthrough
+        os_log(.info, log: recordingLog, "keyDown: keyCode=%d repeat=%d modifiers=%{public}@ decision=%{public}@", event.keyCode, event.isARepeat ? 1 : 0, String(describing: snapshotModifiers), keyDecision == .consume ? "consume" : "passthrough")
         return snapshotDecision == .consume || keyDecision == .consume
     }
 
     private func handleKeyUp(_ event: NSEvent) -> Bool {
         guard !ShortcutBinding.modifierKeyCodes.contains(event.keyCode) else { return false }
-        let snapshotDecision = onInputEvent?(
-            .modifierSnapshot(ModifierKeyEventState.pressedModifierKeyCodes(
-                for: event,
-                trustedFunctionKeyIsDown: fnKeyIsDown
-            ))
-        ) ?? .passthrough
+        let snapshotModifiers = ModifierKeyEventState.pressedModifierKeyCodes(
+            for: event,
+            trustedFunctionKeyIsDown: fnKeyIsDown,
+            currentlyPressedKeyCodes: pressedModifierKeyCodes
+        )
+        pressedModifierKeyCodes = snapshotModifiers
+        let snapshotDecision = onInputEvent?(.modifierSnapshot(snapshotModifiers)) ?? .passthrough
         let keyDecision = onInputEvent?(
             .keyChanged(keyCode: event.keyCode, isDown: false, isRepeat: false)
         ) ?? .passthrough

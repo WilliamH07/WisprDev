@@ -18,14 +18,24 @@ struct LiveAudioLevelNormalizer {
     private var noiseFloorDB: Float = -55
     private var peakCeilingDB: Float = -37
     private var displayLevel: Float = 0
+    private(set) var hasDetectedActiveSpeech: Bool = false
+    private(set) var activeSpeechFrameCount: Int = 0
+    private(set) var peakRMS: Float = 0
 
     mutating func reset() {
         noiseFloorDB = -55
         peakCeilingDB = -37
         displayLevel = 0
+        hasDetectedActiveSpeech = false
+        activeSpeechFrameCount = 0
+        peakRMS = 0
     }
 
     mutating func normalizedLevel(forRMS rms: Float) -> Float {
+        if rms > peakRMS {
+            peakRMS = rms
+        }
+
         let levelDB = 20 * log10f(max(rms, Self.minimumRMS))
 
         updateNoiseFloor(with: levelDB)
@@ -40,6 +50,10 @@ struct LiveAudioLevelNormalizer {
             normalized = 0
         } else if isActiveSpeech {
             normalized = max(normalized, Self.minimumVisibleActiveLevel)
+            activeSpeechFrameCount += 1
+            if activeSpeechFrameCount >= 2 {
+                hasDetectedActiveSpeech = true
+            }
         }
 
         let blend = normalized > displayLevel ? Self.displayAttackBlend : Self.displayReleaseBlend

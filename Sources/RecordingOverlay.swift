@@ -10,6 +10,12 @@ final class RecordingOverlayState: ObservableObject {
     @Published var isCommandMode = false
     @Published var updateVersion: String = ""
     @Published var errorMessage: String?
+    @Published var copiedSnippet: String?
+    @Published var fullTranscriptToCopy: String?
+    @Published var isCopiedToClipboard = false
+    @Published var memoryResultSnippet: String?
+    @Published var memoryResultFullText: String?
+    @Published var memoryResultSourceApp: String?
     @Published var toastID: UUID?
 }
 
@@ -17,7 +23,10 @@ enum OverlayPhase {
     case initializing
     case recording
     case transcribing
+    case rewriting
     case feedback
+    case copiedFallback
+    case memoryResult
     case updateAvailable
 }
 
@@ -53,16 +62,46 @@ private func makeOverlayPanel(width: CGFloat, height: CGFloat) -> NSPanel {
     return panel
 }
 
+struct NotchOverlayContainerView<V: View>: View {
+    let width: CGFloat
+    let height: CGFloat
+    let cornerRadius: CGFloat
+    let hasNotch: Bool
+    @ObservedObject var state: RecordingOverlayState
+    let rootView: V
+
+    var body: some View {
+        rootView
+            .frame(width: width, height: height)
+            .background(
+                LiquidGlassPillBackground(
+                    cornerRadius: cornerRadius,
+                    audioLevel: state.audioLevel,
+                    isRecording: state.phase == .recording,
+                    isRewriting: state.phase == .rewriting,
+                    hasNotch: hasNotch
+                )
+            )
+            .clipShape(Capsule())
+    }
+}
+
 private func makeNotchContent<V: View>(
     width: CGFloat,
     height: CGFloat,
     cornerRadius: CGFloat,
+    hasNotch: Bool,
+    state: RecordingOverlayState,
     rootView: V
 ) -> NSView {
-    let shaped = rootView
-        .frame(width: width, height: height)
-        .background(Color.black)
-        .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: cornerRadius, bottomTrailingRadius: cornerRadius))
+    let shaped = NotchOverlayContainerView(
+        width: width,
+        height: height,
+        cornerRadius: cornerRadius,
+        hasNotch: hasNotch,
+        state: state,
+        rootView: rootView
+    )
 
     let hosting = NSHostingView(rootView: shaped)
     hosting.frame = NSRect(x: 0, y: 0, width: width, height: height)
@@ -126,6 +165,8 @@ final class RecordingOverlayManager {
     private var overlayAcceptsMouseEvents: Bool {
         (overlayState.phase == .recording && overlayState.recordingTriggerMode == .toggle)
             || overlayState.phase == .updateAvailable
+            || overlayState.phase == .copiedFallback
+            || overlayState.phase == .memoryResult
     }
 
     func showInitializing(mode: RecordingTriggerMode = .hold, isCommandMode: Bool = false) {
@@ -179,6 +220,15 @@ final class RecordingOverlayManager {
         }
     }
 
+    func showRewriting() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.lockedOverlayWidth = nil
+            self.overlayState.phase = .rewriting
+            self.showOverlayPanel(animatedResize: true)
+        }
+    }
+
     func showFailureIndicator() {
         DispatchQueue.main.async {
             self.showFeedbackPanel()
@@ -202,7 +252,8 @@ final class RecordingOverlayManager {
             let cutoff = message.index(message.startIndex, offsetBy: Self.maxToastMessageLength - 1)
             return String(message[..<cutoff]) + "…"
         }()
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
             let toastID = UUID()
             self.overlayState.errorMessage = truncated
             self.overlayState.toastID = toastID
@@ -218,6 +269,65 @@ final class RecordingOverlayManager {
                 }
                 self.overlayState.errorMessage = nil
                 self.overlayState.toastID = nil
+                self.dismissAll()
+            }
+        }
+    }
+
+    /// Shows an interactive notch pill allowing the user to copy the transcript when focus is lost or not in an input
+    func showCopiedFallback(snippet: String, fullTranscript: String? = nil) {
+        let textToUse = fullTranscript ?? snippet
+        let truncated: String = {
+            if snippet.count <= 42 { return snippet }
+            let cutoff = snippet.index(snippet.startIndex, offsetBy: 41)
+            return String(snippet[..<cutoff]) + "…"
+        }()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let toastID = UUID()
+            self.overlayState.copiedSnippet = truncated
+            self.overlayState.fullTranscriptToCopy = textToUse
+            self.overlayState.isCopiedToClipboard = false
+            self.overlayState.toastID = toastID
+            self.lockedOverlayWidth = nil
+            self.overlayState.phase = .copiedFallback
+            self.showOverlayPanel(animatedResize: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 7.0) { [weak self] in
+                guard let self else { return }
+                guard self.overlayState.phase == .copiedFallback,
+                      self.overlayState.toastID == toastID else {
+                    return
+                }
+                self.dismissAll()
+            }
+        }
+    }
+
+    /// Shows a memory search match in the Liquid Glass bubble with a copy button
+    func showMemoryResult(snippet: String, fullText: String, sourceApp: String = "") {
+        let truncated: String = {
+            if snippet.count <= 42 { return snippet }
+            let cutoff = snippet.index(snippet.startIndex, offsetBy: 41)
+            return String(snippet[..<cutoff]) + "…"
+        }()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let toastID = UUID()
+            self.overlayState.memoryResultSnippet = truncated
+            self.overlayState.memoryResultFullText = fullText
+            self.overlayState.memoryResultSourceApp = sourceApp
+            self.overlayState.isCopiedToClipboard = false
+            self.overlayState.toastID = toastID
+            self.lockedOverlayWidth = nil
+            self.overlayState.phase = .memoryResult
+            self.showOverlayPanel(animatedResize: true)
+            HapticFeedbackService.shared.trigger(.success)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { [weak self] in
+                guard let self else { return }
+                guard self.overlayState.phase == .memoryResult,
+                      self.overlayState.toastID == toastID else {
+                    return
+                }
                 self.dismissAll()
             }
         }
@@ -246,13 +356,14 @@ final class RecordingOverlayManager {
             panel.ignoresMouseEvents = !overlayAcceptsMouseEvents
             panel.contentView = makeOverlayContent(frame: frame)
             resize(panel: panel, to: frame, animated: animatedResize)
+            panel.invalidateShadow()
             panel.alphaValue = 1
             panel.orderFrontRegardless()
             return
         }
 
         let panel = makeOverlayPanel(width: frame.width, height: frame.height)
-        panel.hasShadow = false
+        panel.hasShadow = true
         panel.ignoresMouseEvents = !overlayAcceptsMouseEvents
         panel.contentView = makeOverlayContent(frame: frame)
 
@@ -260,6 +371,7 @@ final class RecordingOverlayManager {
 
         let hiddenFrame = NSRect(x: frame.origin.x, y: screen.frame.maxY, width: frame.width, height: frame.height)
         panel.setFrame(hiddenFrame, display: true)
+        panel.invalidateShadow()
         panel.alphaValue = 1
         panel.orderFrontRegardless()
 
@@ -278,6 +390,7 @@ final class RecordingOverlayManager {
         panel.ignoresMouseEvents = !overlayAcceptsMouseEvents
         panel.contentView = makeOverlayContent(frame: frame)
         resize(panel: panel, to: frame, animated: animated)
+        panel.invalidateShadow()
     }
 
     private func setTranscribingPhase() {
@@ -303,6 +416,8 @@ final class RecordingOverlayManager {
                 width: frame.width,
                 height: frame.height,
                 cornerRadius: 14,
+                hasNotch: screenHasNotch,
+                state: overlayState,
                 rootView: AnyView(rootView)
             )
         }
@@ -311,6 +426,8 @@ final class RecordingOverlayManager {
             width: frame.width,
             height: frame.height,
             cornerRadius: screenHasNotch ? 18 : 12,
+            hasNotch: screenHasNotch,
+            state: overlayState,
             rootView: AnyView(
                 RecordingOverlayView(
                     state: overlayState,
@@ -319,9 +436,44 @@ final class RecordingOverlayManager {
                     },
                     onUpdateOverlayPressed: { [weak self] in
                         self?.onUpdateOverlayPressed?()
+                    },
+                    onCopyFallbackPressed: { [weak self] in
+                        guard let self else { return }
+                        if let text = self.overlayState.fullTranscriptToCopy ?? self.overlayState.copiedSnippet {
+                            let pasteboard = NSPasteboard.general
+                            pasteboard.clearContents()
+                            pasteboard.setString(text, forType: .string)
+                        }
+                        withAnimation {
+                            self.overlayState.isCopiedToClipboard = true
+                        }
+                        HapticFeedbackService.shared.trigger(.success)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                            self?.dismissAll()
+                        }
+                    },
+                    onCopyFallbackDismissed: { [weak self] in
+                        self?.dismissAll()
+                    },
+                    onMemoryCopyPressed: { [weak self] in
+                        guard let self else { return }
+                        if let text = self.overlayState.memoryResultFullText ?? self.overlayState.memoryResultSnippet {
+                            let pasteboard = NSPasteboard.general
+                            pasteboard.clearContents()
+                            pasteboard.setString(text, forType: .string)
+                        }
+                        withAnimation {
+                            self.overlayState.isCopiedToClipboard = true
+                        }
+                        HapticFeedbackService.shared.trigger(.success)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                            self?.dismissAll()
+                        }
+                    },
+                    onMemoryDismissed: { [weak self] in
+                        self?.dismissAll()
                     }
                 )
-                .padding(.top, screenHasNotch ? notchOverlap : 0)
             )
         )
     }
@@ -344,13 +496,15 @@ final class RecordingOverlayManager {
     /// the drop-down pill.
     private var useWingedLayout: Bool {
         guard screenHasNotch else { return false }
-        let useCompact = (UserDefaults.standard.object(forKey: "use_compact_overlay") as? Bool) ?? true
+        let useCompact = (UserDefaults.standard.object(forKey: "use_compact_overlay") as? Bool) ?? false
         guard useCompact else { return false }
         switch overlayState.phase {
-        case .recording, .initializing, .transcribing:
+        case .recording, .initializing, .transcribing, .rewriting:
             return true
         case .feedback:
             return overlayState.errorMessage?.isEmpty ?? true
+        case .copiedFallback, .memoryResult:
+            return false
         case .updateAvailable:
             return false
         }
@@ -381,20 +535,12 @@ final class RecordingOverlayManager {
         }
 
         let width = overlayWidth
-        let useCompact = (UserDefaults.standard.object(forKey: "use_compact_overlay") as? Bool) ?? true
-        let forceDropDownPill = overlayState.phase == .feedback
-            && !(overlayState.errorMessage?.isEmpty ?? true)
-        // Compact mode: overlay sits flush with the menu bar on every display.
-        // notchOverlap equals the menu-bar height on non-notched screens too,
-        // so zero protrusion is universal — not notch-only. The legacy
-        // 38pt drop-down pill remains available when use_compact_overlay
-        // is explicitly toggled off. Error toasts also force the drop-down
-        // height so messages stay readable even when compact overlay is enabled.
-        let height: CGFloat = (useCompact && !forceDropDownPill)
-            ? notchOverlap
-            : 38 + (screenHasNotch ? notchOverlap : 0)
+        let height: CGFloat = 44
         let x = screen.frame.midX - width / 2
-        let y = screen.frame.maxY - height
+
+        // Detached Floating Bubble: positioned gracefully below the menu bar or notch
+        let topBoundary = screen.visibleFrame.maxY
+        let y = topBoundary - height - 12
         return NSRect(x: x, y: y, width: width, height: height)
     }
 
@@ -403,45 +549,41 @@ final class RecordingOverlayManager {
             return lockedOverlayWidth
         }
 
+        if overlayState.phase == .copiedFallback {
+            return 330
+        }
+
+        if overlayState.phase == .memoryResult {
+            return 350
+        }
+
         if overlayState.phase == .feedback {
-            // Error toasts size to the message length so short messages do
-            // not get the same wide pill as long ones. ~6.8pt per character
-            // plus 60pt of icon and padding chrome, clamped to 180-420pt so
-            // very short messages stay readable and very long ones do not
-            // stretch the pill across the menu bar. Bare failure-X marker
-            // (no message) keeps the original 92pt.
-            let feedbackWidth: CGFloat = {
-                guard let msg = overlayState.errorMessage, !msg.isEmpty else {
-                    return 92
-                }
-                let estimated = CGFloat(msg.count) * 6.8 + 60
-                return min(420, max(180, estimated))
-            }()
-            guard screenHasNotch else { return feedbackWidth }
-            return max(notchWidth, feedbackWidth)
+            guard let msg = overlayState.errorMessage, !msg.isEmpty else {
+                return 120
+            }
+            let estimated = CGFloat(msg.count) * 7.5 + 70
+            return min(440, max(200, estimated))
         }
 
         if overlayState.phase == .updateAvailable {
-            let updateWidth: CGFloat = 190
-            guard screenHasNotch else { return updateWidth }
-            return max(notchWidth, updateWidth)
+            return 210
         }
 
-        let commandModeWidth: CGFloat = 180
-        let toggleWidth: CGFloat = 150
-        let defaultWidth: CGFloat = 92
-        let baseWidth: CGFloat
+        if overlayState.phase == .rewriting {
+            return 240
+        }
+
+        if overlayState.phase == .initializing {
+            return 180
+        }
 
         if overlayState.isCommandMode {
-            baseWidth = commandModeWidth
+            return 240
         } else if overlayState.phase == .recording && overlayState.recordingTriggerMode == .toggle {
-            baseWidth = toggleWidth
+            return 260
         } else {
-            baseWidth = defaultWidth
+            return 220
         }
-
-        guard screenHasNotch else { return baseWidth }
-        return max(notchWidth, baseWidth)
     }
 
     private func showFeedbackPanel() {
@@ -454,6 +596,13 @@ final class RecordingOverlayManager {
         lockedOverlayWidth = nil
         overlayState.isCommandMode = false
         overlayState.updateVersion = ""
+        overlayState.copiedSnippet = nil
+        overlayState.fullTranscriptToCopy = nil
+        overlayState.isCopiedToClipboard = false
+        overlayState.memoryResultSnippet = nil
+        overlayState.memoryResultFullText = nil
+        overlayState.memoryResultSourceApp = nil
+        overlayState.toastID = nil
         if let panel = overlayWindow {
             panel.orderOut(nil)
             // orderOut alone leaves the panel retained in NSApp.windows with its
@@ -489,7 +638,7 @@ struct WingedRecordingView: View {
     var body: some View {
         wingsHStack
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .animation(.spring(response: 0.28, dampingFraction: 1.0), value: state.phase)
+            .animation(WisperMotion.stateChange, value: state.phase)
     }
 
     private var wingsHStack: some View {
@@ -502,7 +651,10 @@ struct WingedRecordingView: View {
                         Color.clear
                     } else if state.phase == .initializing {
                         InitializingDotsView()
-                            .transition(.opacity)
+                            .wisperContentTransition()
+                    } else if state.phase == .rewriting {
+                        CompactRewritingIndicatorView()
+                            .wisperContentTransition()
                     } else if showsLiveRecordingContent {
                         // Command-mode pencil sits directly above and centered
                         // over the compact waveform inside the same wing
@@ -514,17 +666,17 @@ struct WingedRecordingView: View {
                                 Image(systemName: "pencil")
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(.white.opacity(0.92))
-                                    .transition(.opacity)
+                                    .wisperContentTransition()
                             }
                             CompactWaveformView(
                                 audioLevel: state.audioLevel,
                                 showsActivityPulse: state.phase == .recording
                             )
                         }
-                        .transition(.opacity)
+                        .wisperContentTransition()
                     } else {
                         CompactProcessingIndicatorView()
-                            .transition(.opacity)
+                            .wisperContentTransition()
                     }
                 }
                 Spacer(minLength: 0)
@@ -546,7 +698,7 @@ struct WingedRecordingView: View {
                             .foregroundStyle(.white)
                             .frame(width: 14, height: 14)
                             .background(Circle().fill(Color.red.opacity(0.92)))
-                            .transition(.opacity)
+                            .wisperContentTransition()
                     } else if showsStopButton {
                         Button(action: onStopButtonPressed) {
                             Image(systemName: "stop.fill")
@@ -556,7 +708,7 @@ struct WingedRecordingView: View {
                                 .background(Circle().fill(Color.red.opacity(0.92)))
                         }
                         .buttonStyle(.plain)
-                        .transition(.opacity)
+                        .wisperContentTransition()
                     }
                 }
                 Spacer(minLength: 0)
@@ -564,7 +716,7 @@ struct WingedRecordingView: View {
             .frame(width: rightWingWidth, height: height)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .animation(.spring(response: 0.28, dampingFraction: 1.0), value: state.phase)
+        .animation(WisperMotion.stateChange, value: state.phase)
     }
 }
 
@@ -576,10 +728,34 @@ struct WaveformBar: View {
     private let minHeight: CGFloat = 2
     private let maxHeight: CGFloat = 22
 
+    @AppStorage("overlay_glass_style") private var glassStyle = OverlayGlassStyle.liquidGlass.rawValue
+
     var body: some View {
         Capsule()
-            .fill(.white)
+            .fill(
+                glassStyle == OverlayGlassStyle.liquidGlass.rawValue
+                    ? AnyShapeStyle(
+                        LinearGradient(
+                            stops: [
+                                .init(color: Color(red: 0.45, green: 0.85, blue: 1.0), location: 0.0),
+                                .init(color: .white, location: 0.4),
+                                .init(color: Color(red: 0.85, green: 0.55, blue: 1.0), location: 1.0)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    : AnyShapeStyle(Color.white)
+            )
             .frame(width: 3, height: minHeight + (maxHeight - minHeight) * amplitude)
+            .shadow(
+                color: glassStyle == OverlayGlassStyle.liquidGlass.rawValue
+                    ? Color(red: 0.4, green: 0.7, blue: 1.0).opacity(Double(amplitude) * 0.45)
+                    : Color.clear,
+                radius: 3,
+                x: 0,
+                y: 0
+            )
     }
 }
 
@@ -699,10 +875,34 @@ struct CompactWaveformBar: View {
     private let minHeight: CGFloat = 2
     private let maxHeight: CGFloat = 14
 
+    @AppStorage("overlay_glass_style") private var glassStyle = OverlayGlassStyle.liquidGlass.rawValue
+
     var body: some View {
         Capsule()
-            .fill(.white)
+            .fill(
+                glassStyle == OverlayGlassStyle.liquidGlass.rawValue
+                    ? AnyShapeStyle(
+                        LinearGradient(
+                            stops: [
+                                .init(color: Color(red: 0.5, green: 0.85, blue: 1.0), location: 0.0),
+                                .init(color: .white, location: 0.5),
+                                .init(color: Color(red: 0.85, green: 0.55, blue: 1.0), location: 1.0)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    : AnyShapeStyle(Color.white)
+            )
             .frame(width: 2, height: minHeight + (maxHeight - minHeight) * amplitude)
+            .shadow(
+                color: glassStyle == OverlayGlassStyle.liquidGlass.rawValue
+                    ? Color.cyan.opacity(Double(amplitude) * 0.35)
+                    : Color.clear,
+                radius: 2,
+                x: 0,
+                y: 0
+            )
     }
 }
 
@@ -724,7 +924,8 @@ struct ProcessingWaveformView: View {
             }
             .frame(height: 20)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(height: 20)
+        .fixedSize()
     }
 
     private func phase(for index: Int, time: TimeInterval) -> Double {
@@ -779,7 +980,7 @@ struct ProcessingIndicatorView: View {
                     .rotationEffect(.degrees(rotation))
                     .frame(height: 20)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .transition(.opacity)
+                    .wisperContentTransition()
                     .onAppear {
                         rotation = 0
                         withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) {
@@ -788,7 +989,7 @@ struct ProcessingIndicatorView: View {
                     }
             } else {
                 ProcessingWaveformView()
-                    .transition(.opacity)
+                    .wisperContentTransition()
             }
         }
         .task {
@@ -822,7 +1023,7 @@ struct CompactProcessingIndicatorView: View {
                     .rotationEffect(.degrees(rotation))
                     .frame(height: 18)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .transition(.opacity)
+                    .wisperContentTransition()
                     .onAppear {
                         rotation = 0
                         withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) {
@@ -831,7 +1032,7 @@ struct CompactProcessingIndicatorView: View {
                     }
             } else {
                 CompactProcessingWaveformView()
-                    .transition(.opacity)
+                    .wisperContentTransition()
             }
         }
         .task {
@@ -864,7 +1065,8 @@ struct CompactProcessingWaveformView: View {
             }
             .frame(height: 18)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(height: 18)
+        .fixedSize()
     }
 
     private func phase(for index: Int, time: TimeInterval) -> Double {
@@ -905,6 +1107,139 @@ private struct CompactProcessingPill: View {
     }
 }
 
+struct RewritingWaveView: View {
+    private static let barCount = 7
+    private static let multipliers: [CGFloat] = [0.45, 0.70, 0.90, 1.0, 0.90, 0.70, 0.45]
+    private static let centerIndex = CGFloat((barCount - 1) / 2)
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { context in
+            let time = context.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 3) {
+                ForEach(0..<Self.barCount, id: \.self) { index in
+                    let amp = amplitude(for: index, time: time)
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                stops: [
+                                    .init(color: Color(red: 0.85, green: 0.55, blue: 1.0), location: 0.0),
+                                    .init(color: Color.white, location: 0.45),
+                                    .init(color: Color(red: 0.45, green: 0.85, blue: 1.0), location: 1.0)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 2.8, height: 3 + 14 * amp)
+                        .shadow(color: Color(red: 0.75, green: 0.40, blue: 1.0).opacity(Double(amp) * 0.4), radius: 2)
+                }
+            }
+            .frame(height: 20)
+        }
+        .frame(height: 20)
+        .fixedSize()
+    }
+
+    private func amplitude(for index: Int, time: TimeInterval) -> CGFloat {
+        let wave = 0.5 + 0.5 * sin((time * 5.5) - Double(index) * 0.7)
+        return min(max(CGFloat(wave) * Self.multipliers[index], 0.15), 1.0)
+    }
+}
+
+struct RewritingIndicatorView: View {
+    @State private var rotation: Double = 0
+    @State private var pulse = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [Color(red: 0.75, green: 0.50, blue: 1.0), Color(red: 1.0, green: 0.60, blue: 0.90)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .rotationEffect(.degrees(rotation))
+                    .scaleEffect(pulse ? 1.12 : 0.90)
+
+                Text("Réécriture")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.65, green: 0.35, blue: 1.0).opacity(0.35),
+                                Color(red: 0.45, green: 0.20, blue: 0.85).opacity(0.22)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            )
+            .overlay(
+                Capsule()
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.85, green: 0.60, blue: 1.0).opacity(0.55),
+                                Color(red: 0.55, green: 0.30, blue: 0.90).opacity(0.20)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.8
+                    )
+            )
+            .layoutPriority(1)
+
+            RewritingWaveView()
+        }
+        .onAppear {
+            withAnimation(.linear(duration: 4).repeatForever(autoreverses: false)) {
+                rotation = 360
+            }
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+        }
+    }
+}
+
+struct CompactRewritingIndicatorView: View {
+    @State private var rotation: Double = 0
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [Color(red: 0.6, green: 0.45, blue: 1.0), Color(red: 1.0, green: 0.5, blue: 0.85)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .rotationEffect(.degrees(rotation))
+                .onAppear {
+                    withAnimation(.linear(duration: 4).repeatForever(autoreverses: false)) {
+                        rotation = 360
+                    }
+                }
+            CompactProcessingWaveformView()
+        }
+    }
+}
+
 struct InitializingDotsView: View {
     @State private var activeDot = 0
     @State private var timer: Timer?
@@ -937,9 +1272,10 @@ struct RecordingOverlayView: View {
     @ObservedObject var state: RecordingOverlayState
     let onStopButtonPressed: () -> Void
     let onUpdateOverlayPressed: () -> Void
-
-    private let leadingAccessoryWidth: CGFloat = 24
-    private let trailingAccessoryWidth: CGFloat = 32
+    let onCopyFallbackPressed: () -> Void
+    let onCopyFallbackDismissed: () -> Void
+    let onMemoryCopyPressed: () -> Void
+    let onMemoryDismissed: () -> Void
 
     private var showsLiveRecordingContent: Bool {
         state.phase == .recording
@@ -951,65 +1287,98 @@ struct RecordingOverlayView: View {
 
     var body: some View {
         Group {
-            if state.phase == .feedback, let message = state.errorMessage {
+            if state.phase == .copiedFallback {
+                CopiedFallbackView(
+                    state: state,
+                    onCopy: onCopyFallbackPressed,
+                    onDismiss: onCopyFallbackDismissed
+                )
+            } else if state.phase == .memoryResult {
+                MemoryResultOverlayView(
+                    state: state,
+                    onCopy: onMemoryCopyPressed,
+                    onDismiss: onMemoryDismissed
+                )
+            } else if state.phase == .feedback, let message = state.errorMessage {
                 ErrorOverlayView(message: message)
             } else if state.phase == .feedback {
                 FailureIndicatorView()
             } else if state.phase == .updateAvailable {
                 UpdateAvailableOverlayView(onPress: onUpdateOverlayPressed)
-            } else {
-                ZStack {
-                    Group {
-                        if state.phase == .initializing {
-                            InitializingDotsView()
-                                .transition(.opacity)
-                        } else if showsLiveRecordingContent {
-                            WaveformView(
-                                audioLevel: state.audioLevel,
-                                showsActivityPulse: state.phase == .recording
-                            )
-                                .transition(.opacity)
-                        } else {
-                            ProcessingIndicatorView()
-                                .transition(.opacity)
-                        }
+            } else if state.phase == .rewriting {
+                RewritingIndicatorView()
+                    .wisperContentTransition()
+            } else if state.phase == .initializing {
+                HStack(spacing: 8) {
+                    InitializingDotsView()
+                        .fixedSize()
+                    Text("Écoute…")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.95))
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+                .glassChip()
+                .wisperContentTransition()
+            } else if showsLiveRecordingContent {
+                HStack(spacing: 10) {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(WisperPalette.recording)
+                            .frame(width: 7, height: 7)
+                            .shadow(color: WisperPalette.recording.opacity(0.9), radius: 3)
+                        Text("Parler")
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                    .glassChip()
+                    .layoutPriority(1)
+
+                    WaveformView(
+                        audioLevel: state.audioLevel,
+                        showsActivityPulse: true
+                    )
+                    .fixedSize()
+
+                    if state.isCommandMode {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.9))
                     }
 
-                    HStack {
-                        Group {
-                            if state.isCommandMode {
-                                CommandModeIndicator()
-                                    .transition(.opacity)
-                            }
+                    if showsStopButton {
+                        Button(action: onStopButtonPressed) {
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 7, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 16, height: 16)
+                                .background(Circle().fill(WisperPalette.recording.opacity(0.92)))
                         }
-                        .frame(width: leadingAccessoryWidth, alignment: .center)
-                        .frame(maxHeight: .infinity, alignment: .center)
-
-                        Spacer(minLength: 0)
-
-                        Group {
-                            if showsStopButton {
-                                Button(action: onStopButtonPressed) {
-                                    Image(systemName: "stop.fill")
-                                        .font(.system(size: 7, weight: .bold))
-                                        .foregroundStyle(.white)
-                                        .frame(width: 14, height: 14)
-                                        .background(Circle().fill(Color.red.opacity(0.92)))
-                                }
-                                .buttonStyle(.plain)
-                                .transition(.move(edge: .trailing).combined(with: .opacity))
-                            }
-                        }
-                        .frame(width: trailingAccessoryWidth, alignment: .trailing)
+                        .buttonStyle(.plain)
                     }
                 }
+                .wisperContentTransition()
+            } else {
+                HStack(spacing: 8) {
+                    ProcessingIndicatorView()
+                        .fixedSize()
+                    Text("Transcription…")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.95))
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+                .glassChip()
+                .wisperContentTransition()
             }
         }
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .animation(.spring(response: 0.28, dampingFraction: 1.0), value: state.phase)
-        .animation(.spring(response: 0.28, dampingFraction: 1.0), value: state.recordingTriggerMode)
-        .animation(.spring(response: 0.28, dampingFraction: 1.0), value: state.isCommandMode)
+        .animation(WisperMotion.stateChange, value: state.phase)
+        .animation(WisperMotion.stateChange, value: state.recordingTriggerMode)
+        .animation(WisperMotion.stateChange, value: state.isCommandMode)
     }
 }
 
@@ -1030,7 +1399,7 @@ struct FailureIndicatorView: View {
             .font(.system(size: 12, weight: .bold))
             .foregroundStyle(.white)
             .frame(width: 20, height: 20)
-            .background(Circle().fill(Color.red.opacity(0.92)))
+            .background(Circle().fill(WisperPalette.error.opacity(0.92)))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
@@ -1045,7 +1414,7 @@ struct ErrorOverlayView: View {
         HStack(spacing: 6) {
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(Color.red.opacity(0.92))
+                .foregroundStyle(WisperPalette.error.opacity(0.92))
             Text(message)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.white)
@@ -1074,5 +1443,85 @@ struct UpdateAvailableOverlayView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .buttonStyle(.plain)
+    }
+}
+
+struct CopiedFallbackView: View {
+    @ObservedObject var state: RecordingOverlayState
+    let onCopy: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if state.isCopiedToClipboard {
+                SuccessCheckmarkView(label: "Copié !")
+            } else {
+                HStack(spacing: 5) {
+                    Image(systemName: "doc.on.doc.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+
+                    Text(state.copiedSnippet ?? "Texte prêt")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+
+                Spacer(minLength: 4)
+
+                GlassCapsuleButton(title: "Copier", action: onCopy)
+
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .padding(4)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+}
+
+struct MemoryResultOverlayView: View {
+    @ObservedObject var state: RecordingOverlayState
+    let onCopy: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if state.isCopiedToClipboard {
+                SuccessCheckmarkView(label: "Mémoire copiée !")
+            } else {
+                HStack(spacing: 5) {
+                    Image(systemName: "brain.head.profile")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(WisperPalette.memoryGradient)
+
+                    Text(state.memoryResultSnippet ?? "Souvenir retrouvé")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+
+                Spacer(minLength: 4)
+
+                GlassCapsuleButton(title: "Copier", useAccentFill: true, action: onCopy)
+
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .padding(4)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 }
