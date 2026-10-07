@@ -252,8 +252,7 @@ final class RecordingOverlayManager {
             let cutoff = message.index(message.startIndex, offsetBy: Self.maxToastMessageLength - 1)
             return String(message[..<cutoff]) + "…"
         }()
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
+        DispatchQueue.main.async { [self] in
             let toastID = UUID()
             self.overlayState.errorMessage = truncated
             self.overlayState.toastID = toastID

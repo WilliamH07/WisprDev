@@ -39,6 +39,20 @@ struct AppContext {
     )
 }
 
+enum DesktopScreenshotFallbackPreference {
+    static let storageKey = "context_desktop_screenshot_fallback_enabled"
+
+    static func load(from defaults: UserDefaults) -> Bool {
+        defaults.object(forKey: storageKey) == nil
+            ? true
+            : defaults.bool(forKey: storageKey)
+    }
+
+    static func save(_ enabled: Bool, to defaults: UserDefaults) {
+        defaults.set(enabled, forKey: storageKey)
+    }
+}
+
 final class AppContextService {
     static let defaultContextModel = "qwen/qwen3.6-27b"
     static let defaultContextPrompt = """
@@ -58,6 +72,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
     private let maxScreenshotDataURILength = 500_000
     private let screenshotCompressionPrimary = 0.5
     private let screenshotMaxDimension: CGFloat
+    private let desktopScreenshotFallbackEnabled: Bool
     private var contextRequestTimeoutSeconds: TimeInterval {
         let override = UserDefaults.standard.double(forKey: "context_request_timeout_seconds")
         return override > 0 ? override : 20
@@ -68,9 +83,11 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         baseURL: String = "https://api.groq.com/openai/v1",
         customContextPrompt: String = "",
         contextModel: String = AppContextService.defaultContextModel,
-        screenshotMaxDimension: CGFloat = AppContextService.defaultScreenshotMaxDimension
+        screenshotMaxDimension: CGFloat = AppContextService.defaultScreenshotMaxDimension,
+        desktopScreenshotFallbackEnabled: Bool = true
     ) {
         self.apiKey = apiKey
+        self.desktopScreenshotFallbackEnabled = desktopScreenshotFallbackEnabled
         self.baseURL = baseURL
         self.customContextPrompt = customContextPrompt
         let trimmedModel = contextModel.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -551,6 +568,23 @@ Selected text: \(selectedText ?? "None")
             }
         }
 
+        return captureDesktopFallback {
+            captureDesktopScreenshot()
+        }
+    }
+
+    // Keep the preference boundary ahead of all desktop capture and image work.
+    // The injected operation also lets tests verify this without Screen Recording.
+    func captureDesktopFallback(
+        using capture: () -> (dataURL: String?, mimeType: String?, error: String?)
+    ) -> (dataURL: String?, mimeType: String?, error: String?) {
+        guard desktopScreenshotFallbackEnabled else {
+            return (nil, nil, "Active-window screenshot unavailable; full-desktop fallback is disabled in Settings.")
+        }
+        return capture()
+    }
+
+    private func captureDesktopScreenshot() -> (dataURL: String?, mimeType: String?, error: String?) {
         guard let fullScreenImage = CGWindowListCreateImage(
             CGRect.infinite,
             .optionOnScreenOnly,

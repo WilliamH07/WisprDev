@@ -109,11 +109,23 @@ defaults delete com.williamh07.wisper context_request_timeout_seconds
 
 </details>
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to set up the project, build, test, and submit changes.
+
 ## Origin and credits
 
 Wisper is a modified fork of [FreeFlow](https://github.com/zachlatta/freeflow) by [Zach Latta](https://github.com/zachlatta) and its contributors, released under the MIT license. The original copyright notice is kept in [LICENSE](LICENSE). Many thanks to the original author and to [@marcbodea](https://github.com/marcbodea) for maintaining FreeFlow.
 
-Changes in this fork: renamed app and bundle identifier, semantic memory, AI assistant window, local inference service and a redesigned interface.
+## What this fork adds
+
+On top of FreeFlow's dictation, this fork adds:
+
+- **Rewrite selected text.** Press the rewrite shortcut and the selected text in any app is rewritten by an LLM and pasted back over the selection. The text is read through the Accessibility API, with a Cmd+C fallback for browsers and Electron apps, and your clipboard is restored afterwards. The shortcut is configurable (default `⌃⌥R`; a single modifier such as `⌥ Option` can be used). Providers: OpenRouter (free models available), Groq Cloud, or a fully local model through Ollama (Llama 3.2 3B).
+- **AI assistant window.** Double-tap the rewrite shortcut (within about 0.4 s) to open or close a chat window with an LLM. Choose among several models (GPT-4o Mini, Gemini 2.0 Flash, Claude Haiku, Claude Sonnet 5.5, GPT-6.1 Sol), stream answers, attach an area of the screen captured Cmd+Shift+4 style, and insert the answer at the cursor. The double-tap behavior can be turned off in Settings, in which case a single press always rewrites.
+- **Semantic memory.** Past content is indexed with Apple's on-device `NaturalLanguage` embeddings and relevant memories are added to the assistant's prompt.
+- **Local inference.** A service to run the rewrite and assistant features against a local Ollama server (`127.0.0.1:11434`) with no cloud call.
+- **Interface.** Renamed app and bundle identifier (Wisper), a custom design system with a Liquid Glass style, and haptic feedback.
 
 ## License
 
