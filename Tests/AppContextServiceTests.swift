@@ -2,11 +2,58 @@ import Foundation
 
 enum AppContextServiceTests {
     static func run() {
+        testDesktopFallbackPreferencePersistence()
+        testDesktopFallbackCaptureBoundary()
         testQwenRawOutputIsSummarized()
         testQwenReasoningOutputIsStripped()
         testNonStrippingModelPreservesExistingBehavior()
         testDeprecatedGroqModelsAreNotPredefined()
         testQwenCleanupDisablesReasoning()
+    }
+
+    private static func testDesktopFallbackPreferencePersistence() {
+        let suiteName = "FreeFlowTests.DesktopFallback.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        TestSupport.expect(DesktopScreenshotFallbackPreference.load(from: defaults), "Missing preference must preserve enabled fallback")
+        TestSupport.expect(defaults.object(forKey: DesktopScreenshotFallbackPreference.storageKey) == nil, "Reading a default must not write it")
+
+        for enabled in [false, true, false] {
+            DesktopScreenshotFallbackPreference.save(enabled, to: defaults)
+            let reloadedDefaults = UserDefaults(suiteName: suiteName)!
+            TestSupport.expectEqual(DesktopScreenshotFallbackPreference.load(from: reloadedDefaults), enabled)
+        }
+        defaults.removeObject(forKey: DesktopScreenshotFallbackPreference.storageKey)
+        TestSupport.expect(DesktopScreenshotFallbackPreference.load(from: defaults), "Removing preference must restore enabled default")
+    }
+
+    private static func testDesktopFallbackCaptureBoundary() {
+        var captureCalls = 0
+        let syntheticCapture = { () -> (dataURL: String?, mimeType: String?, error: String?) in
+            captureCalls += 1
+            return ("synthetic-image", "image/jpeg", nil)
+        }
+
+        let disabled = AppContextService(apiKey: "", desktopScreenshotFallbackEnabled: false)
+        let skipped = disabled.captureDesktopFallback(using: syntheticCapture)
+        TestSupport.expectEqual(captureCalls, 0)
+        TestSupport.expect(skipped.dataURL == nil && skipped.mimeType == nil, "Disabled fallback must not return an image")
+        TestSupport.expect(skipped.error?.contains("disabled") == true, "Skipped fallback should explain why no image was captured")
+
+        for service in [AppContextService(apiKey: ""), AppContextService(apiKey: "", desktopScreenshotFallbackEnabled: true)] {
+            let result = service.captureDesktopFallback(using: syntheticCapture)
+            TestSupport.expectEqual(result.dataURL, "synthetic-image")
+            TestSupport.expectEqual(result.mimeType, "image/jpeg")
+            TestSupport.expect(result.error == nil, "Successful fallback must preserve its result")
+        }
+        TestSupport.expectEqual(captureCalls, 2)
+
+        let failed = AppContextService(apiKey: "").captureDesktopFallback {
+            (nil, nil, "Synthetic capture failure")
+        }
+        TestSupport.expect(failed.dataURL == nil && failed.mimeType == nil, "Failed fallback must remain image-free")
+        TestSupport.expectEqual(failed.error, "Synthetic capture failure")
     }
 
     private static func testQwenRawOutputIsSummarized() {
