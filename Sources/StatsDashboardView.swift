@@ -220,6 +220,11 @@ struct StatsDashboardView: View {
                 if let timings = appState.lastDictationTimings {
                     Text(DictationTimings.format(timings.total))
                         .font(Craie.mono(24, weight: .medium))
+                    if !timings.engine.isEmpty {
+                        Text(timings.engine)
+                            .font(Craie.mono(11))
+                            .foregroundStyle(Craie.textTertiary)
+                    }
                     VStack(spacing: 6) {
                         timingRow("Finalisation audio", timings.audioFinalize)
                         timingRow("Transcription", timings.transcription)

@@ -3371,6 +3371,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     let transcriptionStart = CFAbsoluteTimeGetCurrent()
                     let rawTranscript = try await transcript
                     timings.transcription = CFAbsoluteTimeGetCurrent() - transcriptionStart
+                    if activeRealtime != nil {
+                        timings.engine = "Streaming temps réel"
+                    } else if transcriptionService.usesLocalEngine {
+                        timings.engine = LocalInferenceService.shared.lastEngineDescription
+                    } else {
+                        timings.engine = "Cloud · \(self.transcriptionModel)"
+                    }
                     let parsedTranscript = Self.parseTranscriptCommands(
                         from: rawTranscript,
                         pressEnterCommandEnabled: self.isPressEnterVoiceCommandEnabled

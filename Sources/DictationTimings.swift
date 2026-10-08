@@ -8,6 +8,8 @@ struct DictationTimings: Equatable {
     var contextWait: TimeInterval = 0
     var postProcessing: TimeInterval = 0
     var skippedPostProcessing = false
+    /// Which transcription engine ran (e.g. "Whisper local · serveur résident"). No user content.
+    var engine = ""
 
     /// Time between releasing the shortcut and the text being ready to paste.
     var total: TimeInterval {
@@ -20,6 +22,7 @@ struct DictationTimings: Equatable {
 
     var summary: String {
         "Total \(Self.format(total)) · transcription \(Self.format(transcription))"
+            + (engine.isEmpty ? "" : " [\(engine)]")
             + (skippedPostProcessing ? " · nettoyage ignoré" : " · nettoyage \(Self.format(postProcessing))")
     }
 }
