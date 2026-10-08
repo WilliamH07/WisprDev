@@ -1362,13 +1362,20 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     private var resolvedTranscriptionBaseURL: String {
-        let trimmed = transcriptionAPIURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? apiBaseURL : trimmed
+        TranscriptionRouting.baseURL(
+            model: transcriptionModel,
+            explicitURL: transcriptionAPIURL,
+            defaultURL: apiBaseURL
+        )
     }
 
     private var resolvedTranscriptionAPIKey: String {
-        let trimmed = transcriptionAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? apiKey : trimmed
+        TranscriptionRouting.apiKey(
+            model: transcriptionModel,
+            explicitKey: transcriptionAPIKey,
+            openRouterKey: openRouterAPIKey,
+            defaultKey: apiKey
+        )
     }
 
     func makeTranscriptionService() throws -> TranscriptionService {
@@ -3659,6 +3666,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func startRealtimeStreamingIfEnabled() {
         guard realtimeStreamingEnabled else { return }
+        // OpenRouter's transcription endpoint is request/response only: no realtime socket.
+        guard !TranscriptionRouting.isOpenRouterModel(transcriptionModel) else { return }
         let trimmedBase = resolvedTranscriptionBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedBase.isEmpty else {
             os_log(.info, log: recordingLog, "realtime streaming requested but base URL is empty — skipping")

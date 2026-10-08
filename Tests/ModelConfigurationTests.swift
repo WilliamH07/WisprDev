@@ -40,6 +40,30 @@ enum ModelConfigurationTests {
         TestSupport.expectEqual(Set(ModelConfiguration.visionModels).count, ModelConfiguration.visionModels.count)
         TestSupport.expectEqual(Set(ModelConfiguration.transcriptionModels).count, ModelConfiguration.transcriptionModels.count)
         TestSupport.expect(
+            ModelConfiguration.transcriptionModels.contains(TranscriptionRouting.fishAudioModel),
+            "Fish Audio should be a selectable transcription model"
+        )
+        TestSupport.expectEqual(
+            TranscriptionRouting.baseURL(model: "fish-audio/transcribe-1", explicitURL: "", defaultURL: "https://api.groq.com/openai/v1"),
+            TranscriptionRouting.openRouterBaseURL
+        )
+        TestSupport.expectEqual(
+            TranscriptionRouting.baseURL(model: "whisper-large-v3", explicitURL: "", defaultURL: "https://api.groq.com/openai/v1"),
+            "https://api.groq.com/openai/v1"
+        )
+        TestSupport.expectEqual(
+            TranscriptionRouting.baseURL(model: "fish-audio/transcribe-1", explicitURL: " https://example.test/v1 ", defaultURL: "x"),
+            "https://example.test/v1"
+        )
+        TestSupport.expectEqual(
+            TranscriptionRouting.apiKey(model: "fish-audio/transcribe-1", explicitKey: "", openRouterKey: "or-key", defaultKey: "groq-key"),
+            "or-key"
+        )
+        TestSupport.expectEqual(
+            TranscriptionRouting.apiKey(model: "whisper-large-v3", explicitKey: "", openRouterKey: "or-key", defaultKey: "groq-key"),
+            "groq-key"
+        )
+        TestSupport.expect(
             Set(ModelConfiguration.visionModels).isSubset(of: Set(ModelConfiguration.llmModels)),
             "Every vision model must also be selectable as an LLM"
         )

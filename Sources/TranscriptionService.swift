@@ -44,10 +44,14 @@ class TranscriptionService {
         self.prompt = (trimmedPrompt?.isEmpty == false) ? trimmedPrompt : nil
     }
 
-    /// True when transcription runs on this Mac (selected explicitly, or because
-    /// local Whisper binaries and a model are installed).
+    /// True when transcription runs on this Mac (selected explicitly, or no API key
+    /// is set and local Whisper binaries and a model are installed).
     var usesLocalEngine: Bool {
-        transcriptionModel == "whisper-local" || LocalInferenceService.shared.isLocalWhisperAvailable
+        if transcriptionModel == "whisper-local" { return true }
+        // Installed local binaries must not override an explicitly selected cloud
+        // model; they only serve as a fallback when no API key is configured.
+        return apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && LocalInferenceService.shared.isLocalWhisperAvailable
     }
 
     static func responseFormat(forModel model: String) -> String {
