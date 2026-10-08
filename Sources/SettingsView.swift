@@ -17,33 +17,24 @@ struct SettingsCard<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 26, height: 26)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color.accentColor.opacity(0.85), Color.accentColor.opacity(0.55)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                    )
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Craie.textSecondary)
+                    .frame(width: 18)
                 Text(title)
-                    .font(.headline)
+                    .font(Craie.titrePublication)
+                    .foregroundStyle(Craie.textPrimary)
             }
             content
         }
-        .padding(16)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Craie.panneau)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Craie.border, lineWidth: 1)
         )
     }
 }
@@ -435,6 +426,17 @@ struct SettingsView: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 8) {
+                    Text(AppName.displayName)
+                        .font(Craie.titre(17))
+                        .foregroundStyle(Craie.textPrimary)
+                    CraieSignalDot(live: appState.isRecording)
+                        .opacity(appState.isRecording || appState.isTranscribing ? 1 : 0)
+                }
+                .padding(.horizontal, 10)
+                .padding(.top, 6)
+                .padding(.bottom, 14)
+
                 ForEach(SettingsTab.visibleCases) { tab in
                     Button {
                         appState.selectedSettingsTab = tab
@@ -450,16 +452,18 @@ struct SettingsView: View {
 
                 Spacer()
             }
-            .padding(10)
-            .frame(width: 190)
-            .background(Color(nsColor: .windowBackgroundColor))
+            .padding(12)
+            .frame(width: 200)
+            .background(Craie.panneau)
 
-            Divider()
+            Rectangle().fill(Craie.border).frame(width: 1)
 
             Group {
                 switch appState.selectedSettingsTab {
                 case .stats:
                     StatsDashboardView()
+                case .memory:
+                    MemoryBrowserView()
                 case .general, .none:
                     GeneralSettingsView()
                 case .shortcuts:
@@ -479,7 +483,9 @@ struct SettingsView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Craie.fond)
         }
+        .frame(minWidth: 900, minHeight: 620)
     }
 }
 
@@ -487,26 +493,29 @@ private struct SettingsSidebarRow: View {
     let title: String
     let icon: String
     let isSelected: Bool
+    @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 9) {
             Image(systemName: icon)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 13, weight: .medium))
                 .frame(width: 18, height: 18, alignment: .center)
-                .foregroundStyle(isSelected ? Color.white : Color.accentColor)
+                .foregroundStyle(isSelected ? Craie.onAction : Craie.textSecondary)
 
             Text(title)
                 .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
-                .foregroundStyle(isSelected ? Color.white : Color.primary)
+                .foregroundStyle(isSelected ? Craie.onAction : Craie.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 7)
         .padding(.horizontal, 10)
         .background(
-            RoundedRectangle(cornerRadius: 7)
-                .fill(isSelected ? Color.accentColor : Color.clear)
+            Capsule()
+                .fill(isSelected ? Craie.action : (hovering ? Craie.surface : Color.clear))
         )
-        .contentShape(Rectangle())
+        .contentShape(Capsule())
+        .animation(Craie.survol, value: hovering)
+        .onHover { hovering = $0 }
     }
 }
 

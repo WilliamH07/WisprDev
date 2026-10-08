@@ -156,10 +156,15 @@ final class UsageStatsStore {
         saveLocked(days)
     }
 
-    func snapshot(now: Date = Date()) -> DictationStatsSnapshot {
+    func snapshot(now: Date = Date(), recentDayCount: Int = 14) -> DictationStatsSnapshot {
         lock.lock()
         defer { lock.unlock() }
-        return DictationStatsCalculator.snapshot(from: loadLocked(), now: now, calendar: calendar)
+        return DictationStatsCalculator.snapshot(
+            from: loadLocked(),
+            now: now,
+            calendar: calendar,
+            recentDayCount: recentDayCount
+        )
     }
 
     func reset() {

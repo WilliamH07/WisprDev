@@ -22,6 +22,7 @@ struct PrecomputedMacro {
 
 enum SettingsTab: String, CaseIterable, Identifiable {
     case stats
+    case memory
     case general
     case shortcuts
     case ai
@@ -41,7 +42,8 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .stats: return "Statistiques"
+        case .stats: return "Accueil"
+        case .memory: return "Mémoire"
         case .general: return "Général"
         case .shortcuts: return "Raccourcis"
         case .ai: return "Intelligence IA"
@@ -55,7 +57,8 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
-        case .stats: return "chart.bar.xaxis"
+        case .stats: return "chart.xyaxis.line"
+        case .memory: return "brain.head.profile"
         case .general: return "gearshape"
         case .shortcuts: return "keyboard"
         case .ai: return "sparkles"
