@@ -299,6 +299,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let realtimeStreamingEnabledStorageKey = "realtime_streaming_enabled"
     private let realtimeStreamingModelStorageKey = "realtime_streaming_model"
     private let dictationAudioInterruptionEnabledStorageKey = "dictation_audio_interruption_enabled"
+    private var focusAtRecordingStart: (bundleIdentifier: String?, hadTextInput: Bool)?
     private let pasteAfterShortcutReleaseDelay: TimeInterval = 0.03
     private let pressEnterAfterPasteDelay: TimeInterval = 0.08
     private let clipboardRestoreDelay: TimeInterval = 1.0
@@ -3644,7 +3645,28 @@ final class AppState: ObservableObject, @unchecked Sendable {
         realtimeService = nil
     }
 
+    /// Remembers whether a text field had focus when recording began. Probed off
+    /// the main thread because Accessibility calls can block on unresponsive apps.
+    private func recordFocusAtRecordingStart() {
+        focusAtRecordingStart = nil
+        guard AXIsProcessTrusted(),
+              let app = NSWorkspace.shared.frontmostApplication,
+              app.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
+        let pid = app.processIdentifier
+        let bundleIdentifier = app.bundleIdentifier
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let appElement = AXUIElementCreateApplication(pid)
+            AppContextService.enableEnhancedAccessibility(for: appElement)
+            let probe = Self.probeFocusedElement(in: appElement)
+            let hadTextInput = probe.status == .found && FocusedInputClassifier.isTextInputFocused(probe)
+            DispatchQueue.main.async {
+                self?.focusAtRecordingStart = (bundleIdentifier: bundleIdentifier, hadTextInput: hadTextInput)
+            }
+        }
+    }
+
     private func startContextCapture() {
+        recordFocusAtRecordingStart()
         contextCaptureTask?.cancel()
         capturedContext = nil
         lastContextSummary = "Collecting app context..."
@@ -4044,46 +4066,60 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
 
         let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
+        AppContextService.enableEnhancedAccessibility(for: appElement)
+
+        var probe = Self.probeFocusedElement(in: appElement)
+        // A first read can fail transiently right after a window or focus change;
+        // one short retry avoids a false "no text field" verdict.
+        if probe.status != .found {
+            Thread.sleep(forTimeInterval: 0.05)
+            probe = Self.probeFocusedElement(in: appElement)
+        }
+        if FocusedInputClassifier.isTextInputFocused(probe) { return true }
+
+        // Fall back to what was focused when recording began, if still in the same app.
+        if let start = focusAtRecordingStart,
+           start.bundleIdentifier == frontmostApp.bundleIdentifier {
+            return start.hadTextInput
+        }
+        return false
+    }
+
+    private static func probeFocusedElement(in appElement: AXUIElement) -> FocusedInputProbe {
         var focusedValue: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedValue)
-        guard result == .success,
-              let rawFocused = focusedValue,
-              CFGetTypeID(rawFocused) == AXUIElementGetTypeID() else {
-            return false
+        switch result {
+        case .success:
+            break
+        case .noValue:
+            return FocusedInputProbe(status: .nothingFocused)
+        default:
+            return FocusedInputProbe(status: .unavailable)
+        }
+        guard let rawFocused = focusedValue, CFGetTypeID(rawFocused) == AXUIElementGetTypeID() else {
+            return FocusedInputProbe(status: .unavailable)
         }
         let focusedElement = unsafeBitCast(rawFocused, to: AXUIElement.self)
 
+        var probe = FocusedInputProbe(status: .found)
         var roleValue: CFTypeRef?
-        if AXUIElementCopyAttributeValue(focusedElement, kAXRoleAttribute as CFString, &roleValue) == .success,
-           let role = roleValue as? String {
-            if role == (kAXTextFieldRole as String) ||
-               role == (kAXTextAreaRole as String) ||
-               role == (kAXComboBoxRole as String) {
-                return true
-            }
-            if role == "AXWebArea" || role == "AXGroup" || role == "AXScrollArea" {
-                var rangeValue: CFTypeRef?
-                if AXUIElementCopyAttributeValue(focusedElement, kAXSelectedTextRangeAttribute as CFString, &rangeValue) == .success {
-                    return true
-                }
-            }
+        if AXUIElementCopyAttributeValue(focusedElement, kAXRoleAttribute as CFString, &roleValue) == .success {
+            probe.role = roleValue as? String
         }
-
         var rangeValue: CFTypeRef?
-        if AXUIElementCopyAttributeValue(focusedElement, kAXSelectedTextRangeAttribute as CFString, &rangeValue) == .success {
-            return true
-        }
+        probe.hasSelectedTextRange = AXUIElementCopyAttributeValue(
+            focusedElement, kAXSelectedTextRangeAttribute as CFString, &rangeValue) == .success
         var lineValue: CFTypeRef?
-        if AXUIElementCopyAttributeValue(focusedElement, kAXInsertionPointLineNumberAttribute as CFString, &lineValue) == .success {
-            return true
-        }
-
+        probe.hasInsertionPointLine = AXUIElementCopyAttributeValue(
+            focusedElement, kAXInsertionPointLineNumberAttribute as CFString, &lineValue) == .success
         var isSettable: DarwinBoolean = false
-        if AXUIElementIsAttributeSettable(focusedElement, kAXValueAttribute as CFString, &isSettable) == .success && isSettable.boolValue {
-            return true
+        probe.isValueSettable = AXUIElementIsAttributeSettable(
+            focusedElement, kAXValueAttribute as CFString, &isSettable) == .success && isSettable.boolValue
+        var editableValue: CFTypeRef?
+        if AXUIElementCopyAttributeValue(focusedElement, "AXEditable" as CFString, &editableValue) == .success {
+            probe.isMarkedEditable = (editableValue as? Bool) == true
         }
-
-        return false
+        return probe
     }
 
     private func pressEnter() {

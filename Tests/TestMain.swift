@@ -15,6 +15,7 @@ struct WisperTests {
         HapticFeedbackServiceTests.run()
         SemanticMemoryTests.run()
         DictationStatsTests.run()
+        FocusedInputClassifierTests.run()
         print("WisperTests passed")
     }
 }

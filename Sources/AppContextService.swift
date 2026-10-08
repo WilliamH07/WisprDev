@@ -367,23 +367,48 @@ Selected text: \(selectedText ?? "None")
         return nil
     }
 
+    /// Chromium, Electron and some WebKit apps only build their accessibility tree
+    /// (and so expose focus and selected text) when an assistive client asks.
+    /// Setting these attributes is what screen readers do; it is a no-op elsewhere.
+    static func enableEnhancedAccessibility(for appElement: AXUIElement) {
+        AXUIElementSetAttributeValue(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+    }
+
+    /// Reads the selection from the value + selected range when the app does not
+    /// implement AXSelectedText directly.
+    private func selectionFromRange(of element: AXUIElement) -> String? {
+        var rangeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
+              let rangeRef, CFGetTypeID(rangeRef) == AXValueGetTypeID() else { return nil }
+        var range = CFRange()
+        guard AXValueGetValue(unsafeBitCast(rangeRef, to: AXValue.self), .cfRange, &range),
+              range.length > 0 else { return nil }
+        var valueRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &valueRef) == .success,
+              let text = valueRef as? String else { return nil }
+        let nsText = text as NSString
+        guard range.location >= 0, range.location + range.length <= nsText.length else { return nil }
+        let selection = nsText.substring(with: NSRange(location: range.location, length: range.length))
+        return selection.isEmpty ? nil : selection
+    }
+
     private func selectedText(from appElement: AXUIElement) -> String? {
-        if let focusedElement = accessibilityElement(from: appElement, attribute: kAXFocusedUIElementAttribute as CFString),
-           let selectedText = accessibilityString(from: focusedElement, attribute: kAXSelectedTextAttribute as CFString) {
-            return trimmedText(selectedText)
+        if let raw = rawSelectedText(from: appElement) {
+            return trimmedText(raw)
         }
-
-        if let selectedText = accessibilityString(from: appElement, attribute: kAXSelectedTextAttribute as CFString) {
-            return trimmedText(selectedText)
-        }
-
         return nil
     }
 
     private func rawSelectedText(from appElement: AXUIElement) -> String? {
-        if let focusedElement = accessibilityElement(from: appElement, attribute: kAXFocusedUIElementAttribute as CFString),
-           let selectedText = accessibilityRawString(from: focusedElement, attribute: kAXSelectedTextAttribute as CFString) {
-            return selectedText
+        Self.enableEnhancedAccessibility(for: appElement)
+        if let focusedElement = accessibilityElement(from: appElement, attribute: kAXFocusedUIElementAttribute as CFString) {
+            if let selectedText = accessibilityRawString(from: focusedElement, attribute: kAXSelectedTextAttribute as CFString) {
+                return selectedText
+            }
+            if let selection = selectionFromRange(of: focusedElement) {
+                return selection
+            }
         }
 
         if let selectedText = accessibilityRawString(from: appElement, attribute: kAXSelectedTextAttribute as CFString) {
