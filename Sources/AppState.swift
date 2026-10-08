@@ -1047,6 +1047,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
             Task {
                 _ = await LocalInferenceService.shared.ensureServerRunning()
             }
+        } else {
+            // Open the TLS connection to the cloud provider now so the first
+            // dictation after launch does not pay the handshake (no user content sent).
+            LLMAPITransport.prewarm(baseURLs: [resolvedTranscriptionBaseURL, apiBaseURL])
         }
 
         startClipboardMonitoring()
