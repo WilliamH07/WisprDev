@@ -150,6 +150,11 @@ struct SemanticMemoryTests {
         assert(SemanticMemoryService.isMemorySearchQuery("retrouve l'adresse"), "Trigger 'retrouve' must match")
         assert(SemanticMemoryService.isMemorySearchQuery("find my tracking number"), "Trigger 'find my' must match")
 
+        assert(!SemanticMemoryService.isMemorySearchQuery("J'ai retrouvé mes clés ce matin"), "Trigger word inside a sentence must not hijack dictation")
+        assert(!SemanticMemoryService.isMemorySearchQuery("Je pense que what was the plan est clair"), "Trigger mid-sentence must not match")
+        assert(!SemanticMemoryService.isMemorySearchQuery("retrouvé"), "Past participle is not the 'retrouve' command")
+        assert(!SemanticMemoryService.isMemorySearchQuery("Retrouve " + String(repeating: "mot ", count: 20)), "Long dictation is never a memory query")
+        assert(SemanticMemoryService.isMemorySearchQuery("Dis Wisper, retrouve le mot de passe wifi"), "Wake word + command must match")
         assert(!SemanticMemoryService.isMemorySearchQuery("Je vais t'expliquer comment ça marche"), "Normal dictation must not trigger memory search")
         assert(!SemanticMemoryService.isMemorySearchQuery("Merci beaucoup pour votre aide."), "Normal greeting must not trigger memory search")
 

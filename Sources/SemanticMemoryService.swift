@@ -575,18 +575,29 @@ public final class SemanticMemoryService: @unchecked Sendable {
             .replacingOccurrences(of: "!", with: " ")
 
         let words = cleaned.split(separator: " ").map(String.init)
-        let normalized = words.joined(separator: " ")
+        // A memory lookup is a short spoken command, not a paragraph of dictation.
+        guard words.count <= maxMemoryQueryWords else { return false }
+        var normalized = words.joined(separator: " ")
 
-        for trigger in memoryQueryTriggers {
-            if normalized.hasPrefix(trigger) ||
-               normalized.contains("wisper " + trigger) ||
-               normalized.contains("dis wisper " + trigger) ||
-               normalized.contains(trigger) {
-                return true
-            }
+        // Only a command at the START of the utterance counts, after an optional
+        // wake word. Matching anywhere hijacked ordinary sentences such as
+        // "j'ai retrouvé mes clés" or "what was the plan", so the dictation was
+        // swallowed and an old memory was offered for copying instead.
+        for wakeWord in ["dis wisper ", "wisper "] where normalized.hasPrefix(wakeWord) {
+            normalized.removeFirst(wakeWord.count)
+            break
+        }
+
+        for trigger in memoryQueryTriggers where normalized.hasPrefix(trigger) {
+            let rest = normalized.dropFirst(trigger.count)
+            // Whole-word match: "retrouve" must not match "retrouvé" or "retrouvera".
+            if let next = rest.first, next.isLetter || next.isNumber { continue }
+            return true
         }
         return false
     }
+
+    private static let maxMemoryQueryWords = 14
 
     public static func extractSearchQuery(_ text: String) -> String {
         var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
