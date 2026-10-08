@@ -21,6 +21,7 @@ struct PrecomputedMacro {
 }
 
 enum SettingsTab: String, CaseIterable, Identifiable {
+    case stats
     case general
     case shortcuts
     case ai
@@ -40,6 +41,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .stats: return "Statistiques"
         case .general: return "Général"
         case .shortcuts: return "Raccourcis"
         case .ai: return "Intelligence IA"
@@ -53,6 +55,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
+        case .stats: return "chart.bar.xaxis"
         case .general: return "gearshape"
         case .shortcuts: return "keyboard"
         case .ai: return "sparkles"
@@ -714,7 +717,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var hasAccessibility = false
     @Published var hotkeyMonitoringErrorMessage: String?
     @Published var isDebugOverlayActive = false
-    @Published var selectedSettingsTab: SettingsTab? = .general
+    @Published var selectedSettingsTab: SettingsTab? = .stats
     @Published var pipelineHistory: [PipelineHistoryItem] = []
     @Published var debugStatusMessage = "Idle"
     @Published var debugShowsUpdateReminderAfterDictation = false
@@ -3086,6 +3089,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         case postProcessingSucceeded
         case postProcessingFailedFallback
         case preservedExactWording
+        case fastPathShortDictation
         case preservedExactWordingTranslated
         case preservedExactWordingTranslationFailedFallback
         case commandModeSucceeded(invocation: CommandInvocation)
@@ -3105,6 +3109,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     : "Post-processing failed, using raw transcript"
             case .preservedExactWording:
                 return "Preserved exact wording, skipped post-processing"
+            case .fastPathShortDictation:
+                return "Short dictation, skipped post-processing for speed"
             case .preservedExactWordingTranslated:
                 return "Preserved exact wording, translated to output language"
             case .preservedExactWordingTranslationFailedFallback:
@@ -3182,6 +3188,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
                        error.localizedDescription)
                 return (trimmedRawTranscript, .preservedExactWordingTranslationFailedFallback, "")
             }
+        }
+
+        // Fast path: short, plain utterances skip the LLM round-trip entirely,
+        // which removes the largest share of the release-to-paste delay.
+        if TranscriptFastPath.isEnabled,
+           TranscriptFastPath.shouldSkipPostProcessing(
+                transcript: trimmedRawTranscript,
+                outputLanguage: outputLanguage,
+                customVocabulary: customVocabulary,
+                customSystemPrompt: customSystemPrompt
+           ) {
+            return (trimmedRawTranscript, .fastPathShortDictation, "")
         }
 
         do {
@@ -3445,6 +3463,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         } else if self.isVisualPointerEnabled && VisualPointerService.isVisualPointerQuery(trimmedFinalTranscript) {
                             self.executeVisualPointerQuery(trimmedFinalTranscript)
                         } else {
+                            UsageStatsStore.shared.record(
+                                wordCount: DictationStatsCalculator.wordCount(in: trimmedFinalTranscript),
+                                speakingSeconds: duration,
+                                appName: appContext.appName
+                            )
                             SemanticMemoryService.shared.record(
                                 text: trimmedFinalTranscript,
                                 category: .dictation,

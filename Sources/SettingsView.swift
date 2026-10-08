@@ -4,7 +4,7 @@ import ServiceManagement
 
 // MARK: - Shared Helpers
 
-private struct SettingsCard<Content: View>: View {
+struct SettingsCard<Content: View>: View {
     let title: String
     let icon: String
     let content: Content
@@ -458,6 +458,8 @@ struct SettingsView: View {
 
             Group {
                 switch appState.selectedSettingsTab {
+                case .stats:
+                    StatsDashboardView()
                 case .general, .none:
                     GeneralSettingsView()
                 case .shortcuts:
@@ -557,6 +559,7 @@ struct GeneralSettingsView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.openURL) private var openURL
     @AppStorage("show_menu_bar_icon") private var showMenuBarIcon = true
+    @AppStorage(TranscriptFastPath.storageKey) private var fastPathShortDictation = true
     @AppStorage("overlay_display_id") private var overlayDisplayID = 0
     @AppStorage("use_compact_overlay") private var useCompactOverlay = false
     @AppStorage("overlay_glass_style") private var overlayGlassStyle = OverlayGlassStyle.liquidGlass.rawValue
@@ -732,6 +735,12 @@ struct GeneralSettingsView: View {
             Toggle("Lancer \(AppName.displayName) au démarrage", isOn: $appState.launchAtLogin)
 
             Toggle("Afficher dans la barre des menus", isOn: $showMenuBarIcon)
+
+            Toggle("Dictée rapide (phrases courtes sans nettoyage IA)", isOn: $fastPathShortDictation)
+
+            Text("Les phrases de 6 mots ou moins sont collées immédiatement, sans appel au modèle de nettoyage. Désactivée automatiquement si une langue de sortie, un vocabulaire ou un prompt personnalisé est défini.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             Text("Les changements prennent effet immédiatement.")
                 .font(.caption)
