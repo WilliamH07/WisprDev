@@ -181,3 +181,35 @@ enum TranscriptOutputSanitizer {
         })
     }
 }
+
+/// Decides whether an LLM cleanup round-trip can be skipped to cut latency.
+/// Speech-to-text output for a short utterance is already punctuated, so the
+/// extra network call mostly adds delay.
+enum TranscriptFastPath {
+    static let storageKey = "fast_path_short_dictation"
+    static let defaultMaxWords = 6
+
+    static var isEnabled: Bool {
+        UserDefaults.standard.object(forKey: storageKey) == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: storageKey)
+    }
+
+    static func shouldSkipPostProcessing(
+        transcript: String,
+        outputLanguage: String,
+        customVocabulary: String,
+        customSystemPrompt: String,
+        maxWords: Int = defaultMaxWords
+    ) -> Bool {
+        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        // Anything that needs the model's judgment keeps the full pipeline.
+        guard outputLanguage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              customVocabulary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return false }
+        let words = trimmed.split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+        return words.count <= maxWords
+    }
+}

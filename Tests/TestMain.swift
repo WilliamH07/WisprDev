@@ -14,6 +14,9 @@ struct WisperTests {
         AIAssistantAndRewriteTests.run()
         HapticFeedbackServiceTests.run()
         SemanticMemoryTests.run()
+        DictationStatsTests.run()
+        FocusedInputClassifierTests.run()
+        LatencyTests.run()
         print("WisperTests passed")
     }
 }

@@ -21,6 +21,8 @@ struct PrecomputedMacro {
 }
 
 enum SettingsTab: String, CaseIterable, Identifiable {
+    case stats
+    case memory
     case general
     case shortcuts
     case ai
@@ -40,6 +42,8 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .stats: return "Accueil"
+        case .memory: return "Mémoire"
         case .general: return "Général"
         case .shortcuts: return "Raccourcis"
         case .ai: return "Intelligence IA"
@@ -53,6 +57,8 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
+        case .stats: return "chart.xyaxis.line"
+        case .memory: return "brain.head.profile"
         case .general: return "gearshape"
         case .shortcuts: return "keyboard"
         case .ai: return "sparkles"
@@ -296,6 +302,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let realtimeStreamingEnabledStorageKey = "realtime_streaming_enabled"
     private let realtimeStreamingModelStorageKey = "realtime_streaming_model"
     private let dictationAudioInterruptionEnabledStorageKey = "dictation_audio_interruption_enabled"
+    static let maxContextWaitAfterTranscription: TimeInterval = 0.6
+    @Published var lastDictationTimings: DictationTimings?
+    private var focusAtRecordingStart: (bundleIdentifier: String?, hadTextInput: Bool)?
     private let pasteAfterShortcutReleaseDelay: TimeInterval = 0.03
     private let pressEnterAfterPasteDelay: TimeInterval = 0.08
     private let clipboardRestoreDelay: TimeInterval = 1.0
@@ -714,7 +723,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var hasAccessibility = false
     @Published var hotkeyMonitoringErrorMessage: String?
     @Published var isDebugOverlayActive = false
-    @Published var selectedSettingsTab: SettingsTab? = .general
+    @Published var selectedSettingsTab: SettingsTab? = .stats
     @Published var pipelineHistory: [PipelineHistoryItem] = []
     @Published var debugStatusMessage = "Idle"
     @Published var debugShowsUpdateReminderAfterDictation = false
@@ -3086,6 +3095,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         case postProcessingSucceeded
         case postProcessingFailedFallback
         case preservedExactWording
+        case fastPathShortDictation
         case preservedExactWordingTranslated
         case preservedExactWordingTranslationFailedFallback
         case commandModeSucceeded(invocation: CommandInvocation)
@@ -3105,6 +3115,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     : "Post-processing failed, using raw transcript"
             case .preservedExactWording:
                 return "Preserved exact wording, skipped post-processing"
+            case .fastPathShortDictation:
+                return "Short dictation, skipped post-processing for speed"
             case .preservedExactWordingTranslated:
                 return "Preserved exact wording, translated to output language"
             case .preservedExactWordingTranslationFailedFallback:
@@ -3184,6 +3196,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
             }
         }
 
+        // Fast path: short, plain utterances skip the LLM round-trip entirely,
+        // which removes the largest share of the release-to-paste delay.
+        if TranscriptFastPath.isEnabled,
+           TranscriptFastPath.shouldSkipPostProcessing(
+                transcript: trimmedRawTranscript,
+                outputLanguage: outputLanguage,
+                customVocabulary: customVocabulary,
+                customSystemPrompt: customSystemPrompt
+           ) {
+            return (trimmedRawTranscript, .fastPathShortDictation, "")
+        }
+
         do {
             let result = try await postProcessingService.postProcess(
                 transcript: trimmedRawTranscript,
@@ -3231,6 +3255,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         cancelRecordingInitializationTimer()
         shortcutSessionController.reset()
         activeRecordingTriggerMode = nil
+        let releaseTime = CFAbsoluteTimeGetCurrent()
         let sessionIntent = currentSessionIntent
         currentSessionIntent = .dictation
         audioRecorder.onRecordingReady = nil
@@ -3307,6 +3332,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 return
             }
 
+            var timings = DictationTimings()
+            timings.audioFinalize = CFAbsoluteTimeGetCurrent() - releaseTime
             let savedAudioFile = Self.saveAudioFile(from: fileURL)
             let transcriptionFileURL = savedAudioFile?.fileURL ?? fileURL
             self.transcribingAudioFileName = savedAudioFile?.fileName
@@ -3341,7 +3368,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         fileService: transcriptionService,
                         fileURL: transcriptionFileURL
                     )
+                    let transcriptionStart = CFAbsoluteTimeGetCurrent()
                     let rawTranscript = try await transcript
+                    timings.transcription = CFAbsoluteTimeGetCurrent() - transcriptionStart
                     let parsedTranscript = Self.parseTranscriptCommands(
                         from: rawTranscript,
                         pressEnterCommandEnabled: self.isPressEnterVoiceCommandEnabled
@@ -3357,18 +3386,37 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             self?.lastTranscript = bootstrapTranscript
                         }
                     }
+                    // The screen-context task (screenshot + vision call) can take several
+                    // seconds. Do not hold the paste hostage to it: wait briefly, then fall
+                    // back to lightweight app metadata. A short utterance that will skip
+                    // cleanup does not need the context at all.
+                    let willSkipCleanup = !sessionIntent.isCommandMode
+                        && TranscriptFastPath.isEnabled
+                        && TranscriptFastPath.shouldSkipPostProcessing(
+                            transcript: parsedTranscript.transcript,
+                            outputLanguage: self.outputLanguage,
+                            customVocabulary: self.customVocabulary,
+                            customSystemPrompt: self.customSystemPrompt
+                        )
+                    let contextWaitStart = CFAbsoluteTimeGetCurrent()
                     let appContext: AppContext
                     if let sessionContext {
                         appContext = sessionContext
-                    } else if let inFlightContext = await inFlightContextTask?.value {
+                    } else if let inFlightContextTask,
+                              let inFlightContext = await AsyncTimeout.value(
+                                of: inFlightContextTask,
+                                timeout: willSkipCleanup ? 0 : Self.maxContextWaitAfterTranscription
+                              ) ?? nil {
                         appContext = inFlightContext
                     } else {
                         appContext = self.fallbackContextAtStop()
                     }
+                    timings.contextWait = CFAbsoluteTimeGetCurrent() - contextWaitStart
                     try Task.checkCancellation()
                     await MainActor.run { [weak self] in
                         self?.debugStatusMessage = "Running post-processing"
                     }
+                    let postProcessingStart = CFAbsoluteTimeGetCurrent()
                     let result = await self.processTranscript(
                         parsedTranscript.transcript,
                         intent: sessionIntent,
@@ -3379,10 +3427,15 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         outputLanguage: self.outputLanguage,
                         preserveExactWording: self.preserveExactWording
                     )
+                    timings.postProcessing = CFAbsoluteTimeGetCurrent() - postProcessingStart
+                    if case .fastPathShortDictation = result.outcome { timings.skippedPostProcessing = true }
+                    let finishedTimings = timings
                     try Task.checkCancellation()
 
                     await MainActor.run {
                         guard self.isTranscribing else { return }
+                        self.lastDictationTimings = finishedTimings
+                        os_log(.info, log: recordingLog, "Dictation latency: %{public}@", finishedTimings.summary)
                         self.lastContextSummary = appContext.contextSummary
                         self.lastContextScreenshotDataURL = appContext.screenshotDataURL
                         self.lastContextScreenshotStatus = appContext.screenshotError
@@ -3445,6 +3498,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         } else if self.isVisualPointerEnabled && VisualPointerService.isVisualPointerQuery(trimmedFinalTranscript) {
                             self.executeVisualPointerQuery(trimmedFinalTranscript)
                         } else {
+                            UsageStatsStore.shared.record(
+                                wordCount: DictationStatsCalculator.wordCount(in: trimmedFinalTranscript),
+                                speakingSeconds: duration,
+                                appName: appContext.appName
+                            )
                             SemanticMemoryService.shared.record(
                                 text: trimmedFinalTranscript,
                                 category: .dictation,
@@ -3497,7 +3555,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     let resolvedContext: AppContext
                     if let sessionContext {
                         resolvedContext = sessionContext
-                    } else if let inFlightContext = await inFlightContextTask?.value {
+                    } else if let inFlightContextTask,
+                              let inFlightContext = await AsyncTimeout.value(
+                                of: inFlightContextTask,
+                                timeout: Self.maxContextWaitAfterTranscription
+                              ) ?? nil {
                         resolvedContext = inFlightContext
                     } else {
                         resolvedContext = self.fallbackContextAtStop()
@@ -3621,7 +3683,31 @@ final class AppState: ObservableObject, @unchecked Sendable {
         realtimeService = nil
     }
 
+    /// Remembers whether a text field had focus when recording began. Probed off
+    /// the main thread because Accessibility calls can block on unresponsive apps.
+    private func recordFocusAtRecordingStart() {
+        focusAtRecordingStart = nil
+        guard AXIsProcessTrusted(),
+              let app = NSWorkspace.shared.frontmostApplication,
+              app.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
+        let pid = app.processIdentifier
+        let bundleIdentifier = app.bundleIdentifier
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let appElement = AXUIElementCreateApplication(pid)
+            AppContextService.enableEnhancedAccessibility(for: appElement)
+            let probe = Self.probeFocusedElement(in: appElement)
+            let hadTextInput = probe.status == .found && FocusedInputClassifier.isTextInputFocused(probe)
+            DispatchQueue.main.async {
+                self?.focusAtRecordingStart = (bundleIdentifier: bundleIdentifier, hadTextInput: hadTextInput)
+            }
+        }
+    }
+
     private func startContextCapture() {
+        recordFocusAtRecordingStart()
+        var prewarmURLs = [resolvedTranscriptionBaseURL, apiBaseURL]
+        if rewriteProvider == .openRouter { prewarmURLs.append("https://openrouter.ai/api/v1") }
+        LLMAPITransport.prewarm(baseURLs: prewarmURLs)
         contextCaptureTask?.cancel()
         capturedContext = nil
         lastContextSummary = "Collecting app context..."
@@ -4021,46 +4107,60 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
 
         let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
+        AppContextService.enableEnhancedAccessibility(for: appElement)
+
+        var probe = Self.probeFocusedElement(in: appElement)
+        // A first read can fail transiently right after a window or focus change;
+        // one short retry avoids a false "no text field" verdict.
+        if probe.status != .found {
+            Thread.sleep(forTimeInterval: 0.05)
+            probe = Self.probeFocusedElement(in: appElement)
+        }
+        if FocusedInputClassifier.isTextInputFocused(probe) { return true }
+
+        // Fall back to what was focused when recording began, if still in the same app.
+        if let start = focusAtRecordingStart,
+           start.bundleIdentifier == frontmostApp.bundleIdentifier {
+            return start.hadTextInput
+        }
+        return false
+    }
+
+    private static func probeFocusedElement(in appElement: AXUIElement) -> FocusedInputProbe {
         var focusedValue: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedValue)
-        guard result == .success,
-              let rawFocused = focusedValue,
-              CFGetTypeID(rawFocused) == AXUIElementGetTypeID() else {
-            return false
+        switch result {
+        case .success:
+            break
+        case .noValue:
+            return FocusedInputProbe(status: .nothingFocused)
+        default:
+            return FocusedInputProbe(status: .unavailable)
+        }
+        guard let rawFocused = focusedValue, CFGetTypeID(rawFocused) == AXUIElementGetTypeID() else {
+            return FocusedInputProbe(status: .unavailable)
         }
         let focusedElement = unsafeBitCast(rawFocused, to: AXUIElement.self)
 
+        var probe = FocusedInputProbe(status: .found)
         var roleValue: CFTypeRef?
-        if AXUIElementCopyAttributeValue(focusedElement, kAXRoleAttribute as CFString, &roleValue) == .success,
-           let role = roleValue as? String {
-            if role == (kAXTextFieldRole as String) ||
-               role == (kAXTextAreaRole as String) ||
-               role == (kAXComboBoxRole as String) {
-                return true
-            }
-            if role == "AXWebArea" || role == "AXGroup" || role == "AXScrollArea" {
-                var rangeValue: CFTypeRef?
-                if AXUIElementCopyAttributeValue(focusedElement, kAXSelectedTextRangeAttribute as CFString, &rangeValue) == .success {
-                    return true
-                }
-            }
+        if AXUIElementCopyAttributeValue(focusedElement, kAXRoleAttribute as CFString, &roleValue) == .success {
+            probe.role = roleValue as? String
         }
-
         var rangeValue: CFTypeRef?
-        if AXUIElementCopyAttributeValue(focusedElement, kAXSelectedTextRangeAttribute as CFString, &rangeValue) == .success {
-            return true
-        }
+        probe.hasSelectedTextRange = AXUIElementCopyAttributeValue(
+            focusedElement, kAXSelectedTextRangeAttribute as CFString, &rangeValue) == .success
         var lineValue: CFTypeRef?
-        if AXUIElementCopyAttributeValue(focusedElement, kAXInsertionPointLineNumberAttribute as CFString, &lineValue) == .success {
-            return true
-        }
-
+        probe.hasInsertionPointLine = AXUIElementCopyAttributeValue(
+            focusedElement, kAXInsertionPointLineNumberAttribute as CFString, &lineValue) == .success
         var isSettable: DarwinBoolean = false
-        if AXUIElementIsAttributeSettable(focusedElement, kAXValueAttribute as CFString, &isSettable) == .success && isSettable.boolValue {
-            return true
+        probe.isValueSettable = AXUIElementIsAttributeSettable(
+            focusedElement, kAXValueAttribute as CFString, &isSettable) == .success && isSettable.boolValue
+        var editableValue: CFTypeRef?
+        if AXUIElementCopyAttributeValue(focusedElement, "AXEditable" as CFString, &editableValue) == .success {
+            probe.isMarkedEditable = (editableValue as? Bool) == true
         }
-
-        return false
+        return probe
     }
 
     private func pressEnter() {

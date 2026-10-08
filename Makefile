@@ -15,6 +15,10 @@ TEST_RUNNER = $(BUILD_DIR)/WisperTests
 TEST_PRODUCTION_SOURCES = \
 	Sources/AppContextService.swift \
 	Sources/AppName.swift \
+	Sources/AsyncTimeout.swift \
+	Sources/DictationStatsCore.swift \
+	Sources/DictationTimings.swift \
+	Sources/FocusedInputClassifier.swift \
 	Sources/LLMAPITransport.swift \
 	Sources/LLMCooldownManager.swift \
 	Sources/ModelConfiguration.swift \

@@ -229,7 +229,7 @@ Core behavior:
     private let postProcessingMaxCompletionTokens = 4096
     private var postProcessingTimeoutSeconds: TimeInterval {
         let override = UserDefaults.standard.double(forKey: "post_processing_timeout_seconds")
-        return override > 0 ? override : 20
+        return override > 0 ? override : 10
     }
 
     init(
