@@ -299,6 +299,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let realtimeStreamingEnabledStorageKey = "realtime_streaming_enabled"
     private let realtimeStreamingModelStorageKey = "realtime_streaming_model"
     private let dictationAudioInterruptionEnabledStorageKey = "dictation_audio_interruption_enabled"
+    static let maxContextWaitAfterTranscription: TimeInterval = 0.6
+    @Published var lastDictationTimings: DictationTimings?
     private var focusAtRecordingStart: (bundleIdentifier: String?, hadTextInput: Bool)?
     private let pasteAfterShortcutReleaseDelay: TimeInterval = 0.03
     private let pressEnterAfterPasteDelay: TimeInterval = 0.08
@@ -3250,6 +3252,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         cancelRecordingInitializationTimer()
         shortcutSessionController.reset()
         activeRecordingTriggerMode = nil
+        let releaseTime = CFAbsoluteTimeGetCurrent()
         let sessionIntent = currentSessionIntent
         currentSessionIntent = .dictation
         audioRecorder.onRecordingReady = nil
@@ -3326,6 +3329,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 return
             }
 
+            var timings = DictationTimings()
+            timings.audioFinalize = CFAbsoluteTimeGetCurrent() - releaseTime
             let savedAudioFile = Self.saveAudioFile(from: fileURL)
             let transcriptionFileURL = savedAudioFile?.fileURL ?? fileURL
             self.transcribingAudioFileName = savedAudioFile?.fileName
@@ -3360,7 +3365,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         fileService: transcriptionService,
                         fileURL: transcriptionFileURL
                     )
+                    let transcriptionStart = CFAbsoluteTimeGetCurrent()
                     let rawTranscript = try await transcript
+                    timings.transcription = CFAbsoluteTimeGetCurrent() - transcriptionStart
                     let parsedTranscript = Self.parseTranscriptCommands(
                         from: rawTranscript,
                         pressEnterCommandEnabled: self.isPressEnterVoiceCommandEnabled
@@ -3376,18 +3383,37 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             self?.lastTranscript = bootstrapTranscript
                         }
                     }
+                    // The screen-context task (screenshot + vision call) can take several
+                    // seconds. Do not hold the paste hostage to it: wait briefly, then fall
+                    // back to lightweight app metadata. A short utterance that will skip
+                    // cleanup does not need the context at all.
+                    let willSkipCleanup = !sessionIntent.isCommandMode
+                        && TranscriptFastPath.isEnabled
+                        && TranscriptFastPath.shouldSkipPostProcessing(
+                            transcript: parsedTranscript.transcript,
+                            outputLanguage: self.outputLanguage,
+                            customVocabulary: self.customVocabulary,
+                            customSystemPrompt: self.customSystemPrompt
+                        )
+                    let contextWaitStart = CFAbsoluteTimeGetCurrent()
                     let appContext: AppContext
                     if let sessionContext {
                         appContext = sessionContext
-                    } else if let inFlightContext = await inFlightContextTask?.value {
+                    } else if let inFlightContextTask,
+                              let inFlightContext = await AsyncTimeout.value(
+                                of: inFlightContextTask,
+                                timeout: willSkipCleanup ? 0 : Self.maxContextWaitAfterTranscription
+                              ) ?? nil {
                         appContext = inFlightContext
                     } else {
                         appContext = self.fallbackContextAtStop()
                     }
+                    timings.contextWait = CFAbsoluteTimeGetCurrent() - contextWaitStart
                     try Task.checkCancellation()
                     await MainActor.run { [weak self] in
                         self?.debugStatusMessage = "Running post-processing"
                     }
+                    let postProcessingStart = CFAbsoluteTimeGetCurrent()
                     let result = await self.processTranscript(
                         parsedTranscript.transcript,
                         intent: sessionIntent,
@@ -3398,10 +3424,15 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         outputLanguage: self.outputLanguage,
                         preserveExactWording: self.preserveExactWording
                     )
+                    timings.postProcessing = CFAbsoluteTimeGetCurrent() - postProcessingStart
+                    if case .fastPathShortDictation = result.outcome { timings.skippedPostProcessing = true }
+                    let finishedTimings = timings
                     try Task.checkCancellation()
 
                     await MainActor.run {
                         guard self.isTranscribing else { return }
+                        self.lastDictationTimings = finishedTimings
+                        os_log(.info, log: recordingLog, "Dictation latency: %{public}@", finishedTimings.summary)
                         self.lastContextSummary = appContext.contextSummary
                         self.lastContextScreenshotDataURL = appContext.screenshotDataURL
                         self.lastContextScreenshotStatus = appContext.screenshotError
@@ -3521,7 +3552,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     let resolvedContext: AppContext
                     if let sessionContext {
                         resolvedContext = sessionContext
-                    } else if let inFlightContext = await inFlightContextTask?.value {
+                    } else if let inFlightContextTask,
+                              let inFlightContext = await AsyncTimeout.value(
+                                of: inFlightContextTask,
+                                timeout: Self.maxContextWaitAfterTranscription
+                              ) ?? nil {
                         resolvedContext = inFlightContext
                     } else {
                         resolvedContext = self.fallbackContextAtStop()
@@ -3667,6 +3702,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func startContextCapture() {
         recordFocusAtRecordingStart()
+        var prewarmURLs = [resolvedTranscriptionBaseURL, apiBaseURL]
+        if rewriteProvider == .openRouter { prewarmURLs.append("https://openrouter.ai/api/v1") }
+        LLMAPITransport.prewarm(baseURLs: prewarmURLs)
         contextCaptureTask?.cancel()
         capturedContext = nil
         lastContextSummary = "Collecting app context..."
