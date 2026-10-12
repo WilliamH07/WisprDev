@@ -775,6 +775,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var pendingShortcutStartTask: Task<Void, Never>?
     private var pendingShortcutStartMode: RecordingTriggerMode?
     private var realtimeService: RealtimeTranscriptionService?
+    private var chunkedSession: ChunkedTranscriptionSession?
+    private let chunkedTranscriptionStorageKey = "chunked_transcription_enabled"
     private var automaticTerminationDisabled = false
     private var activeAudioInterruption: ActiveAudioInterruption?
     private var pendingOverlayDismissToken: UUID?
@@ -2916,6 +2918,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
 
         startRealtimeStreamingIfEnabled()
+        startChunkedTranscriptionIfEnabled()
 
         // Start engine on background thread so UI isn't blocked
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -3275,9 +3278,25 @@ final class AppState: ObservableObject, @unchecked Sendable {
     /// strict order to avoid paying for both when realtime succeeds.
     private static func resolveRawTranscript(
         realtimeService: RealtimeTranscriptionService?,
+        chunkedSession: ChunkedTranscriptionSession? = nil,
         fileService: TranscriptionService,
         fileURL: URL
     ) async throws -> String {
+        if realtimeService == nil, let chunkedSession {
+            do {
+                try Task.checkCancellation()
+                // Phrases were transcribed while speaking; only the tail is left to wait for.
+                if let text = try await chunkedSession.finish(),
+                   !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return text
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // A chunk failed: fall through to the proven whole-file path.
+                try Task.checkCancellation()
+            }
+        }
         if let realtimeService {
             do {
                 try Task.checkCancellation()
@@ -3390,6 +3409,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
             let activeRealtime = self.realtimeService
             self.realtimeService = nil
+            let activeChunked = self.chunkedSession
+            self.chunkedSession = nil
             self.audioRecorder.onPCM16Samples = nil
             self.transcriptionTask?.cancel()
             guard self.isTranscribing else {
@@ -3398,6 +3419,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 }
                 self.transcribingAudioFileName = nil
                 activeRealtime?.cancel()
+                activeChunked?.cancel()
                 self.audioRecorder.cleanup()
                 self.endCriticalDictationActivity()
                 self.refreshAvailableMicrophonesIfNeeded()
@@ -3406,11 +3428,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
             self.transcriptionTask = Task {
                 defer {
                     activeRealtime?.cancel()
+                    activeChunked?.cancel()
                 }
                 do {
                     let transcriptionService = try self.makeTranscriptionService()
                     async let transcript = Self.resolveRawTranscript(
                         realtimeService: activeRealtime,
+                        chunkedSession: activeChunked,
                         fileService: transcriptionService,
                         fileURL: transcriptionFileURL
                     )
@@ -3423,6 +3447,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         timings.engine = LocalInferenceService.shared.lastEngineDescription
                     } else {
                         timings.engine = "Cloud · \(self.transcriptionModel)"
+                        if let activeChunked, activeChunked.chunkCount > 0 {
+                            timings.engine += " · par morceaux (\(activeChunked.chunkCount))"
+                        }
                     }
                     let parsedTranscript = Self.parseTranscriptCommands(
                         from: rawTranscript,
@@ -3738,10 +3765,32 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// Transcribes phrase chunks while the user is still speaking so that, at release,
+    /// only the last phrase is left to send. Cloud models only (local Whisper has no
+    /// network latency to hide), and never alongside the realtime socket.
+    private func startChunkedTranscriptionIfEnabled() {
+        chunkedSession?.cancel()
+        chunkedSession = nil
+        let enabled = UserDefaults.standard.object(forKey: chunkedTranscriptionStorageKey) == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: chunkedTranscriptionStorageKey)
+        guard enabled, realtimeService == nil, currentSessionIntent.isCommandMode == false else { return }
+        guard let service = try? makeTranscriptionService(), !service.usesLocalEngine else { return }
+        let session = ChunkedTranscriptionSession { fileURL in
+            try await service.transcribe(fileURL: fileURL)
+        }
+        chunkedSession = session
+        audioRecorder.onPCM16Samples = { [weak session] data in
+            session?.append(data)
+        }
+    }
+
     private func tearDownRealtimeService() {
         audioRecorder.onPCM16Samples = nil
         realtimeService?.cancel()
         realtimeService = nil
+        chunkedSession?.cancel()
+        chunkedSession = nil
     }
 
     /// Remembers whether a text field had focus when recording began. Probed off

@@ -569,6 +569,7 @@ struct GeneralSettingsView: View {
     @Environment(\.openURL) private var openURL
     @AppStorage("show_menu_bar_icon") private var showMenuBarIcon = true
     @AppStorage(TranscriptFastPath.storageKey) private var fastPathShortDictation = true
+    @AppStorage("chunked_transcription_enabled") private var chunkedTranscription = true
     @AppStorage(CleanupLatencyGate.budgetStorageKey) private var cleanupBudgetSeconds = 0.0
     @AppStorage(TranscriptFastPath.maxWordsStorageKey) private var fastPathMaxWords = TranscriptFastPath.defaultMaxWords
     @AppStorage("overlay_display_id") private var overlayDisplayID = 0
@@ -748,6 +749,12 @@ struct GeneralSettingsView: View {
             Toggle("Afficher dans la barre des menus", isOn: $showMenuBarIcon)
 
             Toggle("Dictée rapide (phrases courtes sans nettoyage IA)", isOn: $fastPathShortDictation)
+
+            Toggle("Transcrire pendant que je parle (par phrases)", isOn: $chunkedTranscription)
+            Text("Chaque phrase est envoyée à la transcription dès que vous faites une pause, pour qu'au relâchement il ne reste que la dernière à traiter. Sans effet sur les phrases courtes et sur Whisper local.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
 
             if fastPathShortDictation {
                 HStack {
