@@ -121,6 +121,32 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         )
     }
 
+    /// Reads what Accessibility knows about the selection in the frontmost app,
+    /// distinguishing "nothing is selected" from "this app does not say".
+    func collectSelectionEvidence() -> SelectionEvidence {
+        guard AXIsProcessTrusted(),
+              let frontmostApp = NSWorkspace.shared.frontmostApplication else { return .unknown }
+        let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
+        if let text = rawSelectedText(from: appElement) {
+            return .text(text)
+        }
+        guard let focused = accessibilityElement(from: appElement, attribute: kAXFocusedUIElementAttribute as CFString) else {
+            return .unknown
+        }
+        var rangeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(focused, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
+              let rangeRef, CFGetTypeID(rangeRef) == AXValueGetTypeID() else {
+            return .unknown
+        }
+        var range = CFRange()
+        guard AXValueGetValue(unsafeBitCast(rangeRef, to: AXValue.self), .cfRange, &range) else {
+            return .unknown
+        }
+        // A zero-length range is a caret: nothing is selected. A non-empty range whose
+        // text could not be read means we cannot tell, so let the caller try the clipboard.
+        return range.length == 0 ? .caretOnly : .unknown
+    }
+
     func collectContext() async -> AppContext {
         let contextSystemPrompt = resolveContextPrompt()
 

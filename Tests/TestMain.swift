@@ -18,6 +18,8 @@ struct WisperTests {
         FocusedInputClassifierTests.run()
         LatencyTests.run()
         BenchmarkTests.run()
+        ChunkedTranscriberTests.run()
+        SelectionGateTests.run()
         print("WisperTests passed")
     }
 }
