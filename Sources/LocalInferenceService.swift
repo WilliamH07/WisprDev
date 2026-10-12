@@ -290,7 +290,8 @@ public final class LocalInferenceService: @unchecked Sendable {
 
         // Fallback: run CLI (reloads the model on every call, so it is slow)
         let result = try await transcribeViaCli(audioURL: audioURL, language: language, prompt: prompt)
-        lastEngineLock.withLock { $0 = "Whisper local · CLI à froid · \(modelName) (\(serverIssue))" }
+        let fallbackReason = serverIssue
+        lastEngineLock.withLock { $0 = "Whisper local · CLI à froid · \(modelName) (\(fallbackReason))" }
         return result
     }
 
