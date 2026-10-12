@@ -188,6 +188,15 @@ enum TranscriptOutputSanitizer {
 enum TranscriptFastPath {
     static let storageKey = "fast_path_short_dictation"
     static let defaultMaxWords = 6
+    static let maxWordsStorageKey = "fast_path_max_words"
+    static let maxWordsRange = 3...40
+
+    /// User-tunable word threshold (Settings > General), clamped to a safe range.
+    static var configuredMaxWords: Int {
+        let stored = UserDefaults.standard.integer(forKey: maxWordsStorageKey)
+        guard stored > 0 else { return defaultMaxWords }
+        return min(max(stored, maxWordsRange.lowerBound), maxWordsRange.upperBound)
+    }
 
     static var isEnabled: Bool {
         UserDefaults.standard.object(forKey: storageKey) == nil
@@ -200,7 +209,7 @@ enum TranscriptFastPath {
         outputLanguage: String,
         customVocabulary: String,
         customSystemPrompt: String,
-        maxWords: Int = defaultMaxWords
+        maxWords: Int? = nil
     ) -> Bool {
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
@@ -210,6 +219,6 @@ enum TranscriptFastPath {
               customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else { return false }
         let words = trimmed.split(whereSeparator: { $0.isWhitespace || $0.isNewline })
-        return words.count <= maxWords
+        return words.count <= (maxWords ?? configuredMaxWords)
     }
 }

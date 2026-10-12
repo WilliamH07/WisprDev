@@ -29,7 +29,8 @@ public struct ModelConfiguration {
     public static let transcriptionModels = [
         "whisper-local",
         "whisper-large-v3",
-        "whisper-large-v3-turbo"
+        "whisper-large-v3-turbo",
+        TranscriptionRouting.fishAudioModel
     ]
 
     public static func config(for model: String) -> ModelConfig {
@@ -209,5 +210,35 @@ public struct ModelConfiguration {
         }
         
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// Routing for transcription models that are hosted on OpenRouter rather than on
+/// the user's default OpenAI-compatible provider.
+public enum TranscriptionRouting {
+    public static let openRouterBaseURL = "https://openrouter.ai/api/v1"
+    /// Fish Audio speech-to-text, served through OpenRouter's /audio/transcriptions.
+    public static let fishAudioModel = "fish-audio/transcribe-1"
+
+    public static func isOpenRouterModel(_ model: String) -> Bool {
+        model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("fish-audio/")
+    }
+
+    /// An explicit transcription URL always wins. Otherwise an OpenRouter-hosted
+    /// model goes to OpenRouter, and everything else uses the default base URL.
+    public static func baseURL(model: String, explicitURL: String, defaultURL: String) -> String {
+        let explicit = explicitURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !explicit.isEmpty { return explicit }
+        return isOpenRouterModel(model) ? openRouterBaseURL : defaultURL
+    }
+
+    /// Key priority: explicit transcription key, then the OpenRouter key for
+    /// OpenRouter-hosted models, then the default API key.
+    public static func apiKey(model: String, explicitKey: String, openRouterKey: String, defaultKey: String) -> String {
+        let explicit = explicitKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !explicit.isEmpty { return explicit }
+        let router = openRouterKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if isOpenRouterModel(model), !router.isEmpty { return router }
+        return defaultKey
     }
 }

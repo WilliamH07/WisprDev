@@ -266,6 +266,8 @@ public final class LocalInferenceService: @unchecked Sendable {
     /// Fast path: Uses resident in-memory Metal whisper-server (~150ms).
     /// Fallback path: Uses on-demand whisper-cli.
     public func transcribe(audioURL: URL, language: String? = nil, prompt: String? = nil) async throws -> String {
+        let modelName = preferredWhisperModelURL?.lastPathComponent ?? "?"
+        var serverIssue = whisperServerPath == nil ? "binaire whisper-server absent" : ""
         // Fast path: try resident whisper-server
         if whisperServerPath != nil {
             let isReady = await ensureServerRunning()
@@ -273,16 +275,30 @@ public final class LocalInferenceService: @unchecked Sendable {
                 do {
                     let result = try await transcribeViaServer(audioURL: audioURL, language: language, prompt: prompt)
                     if !result.isEmpty {
+                        lastEngineLock.withLock { $0 = "Whisper local · serveur résident · \(modelName)" }
                         return result
                     }
+                    serverIssue = "réponse vide"
                 } catch {
+                    serverIssue = "erreur serveur"
                     os_log(.error, log: localInferenceLog, "whisper-server request failed, falling back to CLI: %{public}@", error.localizedDescription)
                 }
+            } else {
+                serverIssue = "serveur non démarré"
             }
         }
 
-        // Fallback: run CLI
-        return try await transcribeViaCli(audioURL: audioURL, language: language, prompt: prompt)
+        // Fallback: run CLI (reloads the model on every call, so it is slow)
+        let result = try await transcribeViaCli(audioURL: audioURL, language: language, prompt: prompt)
+        lastEngineLock.withLock { $0 = "Whisper local · CLI à froid · \(modelName) (\(serverIssue))" }
+        return result
+    }
+
+    private let lastEngineLock = OSAllocatedUnfairLock<String>(initialState: "")
+
+    /// Human-readable description of the last local transcription path (no user content).
+    public var lastEngineDescription: String {
+        lastEngineLock.withLock { $0 }
     }
 
     /// Fast resident inference via HTTP multipart to whisper-server (< 250ms)

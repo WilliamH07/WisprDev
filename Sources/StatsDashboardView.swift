@@ -9,6 +9,7 @@ struct StatsDashboardView: View {
     @State private var snapshot = UsageStatsStore.shared.snapshot(recentDayCount: 30)
     @State private var hoveredDay: DictationStatsSnapshot.DayPoint?
     @State private var showResetConfirmation = false
+    @StateObject private var benchmark = TranscriptionBenchmarkRunner()
 
     private let tileColumns = [GridItem(.adaptive(minimum: 160), spacing: 12)]
 
@@ -40,6 +41,7 @@ struct StatsDashboardView: View {
                 }
 
                 latencyCard
+                engineBenchmarkCard
                 privacyFooter
             }
             .padding(28)
@@ -220,6 +222,11 @@ struct StatsDashboardView: View {
                 if let timings = appState.lastDictationTimings {
                     Text(DictationTimings.format(timings.total))
                         .font(Craie.mono(24, weight: .medium))
+                    if !timings.engine.isEmpty {
+                        Text(timings.engine)
+                            .font(Craie.mono(11))
+                            .foregroundStyle(Craie.textTertiary)
+                    }
                     VStack(spacing: 6) {
                         timingRow("Finalisation audio", timings.audioFinalize)
                         timingRow("Transcription", timings.transcription)
@@ -248,6 +255,104 @@ struct StatsDashboardView: View {
             Text(label).font(Craie.texte).foregroundStyle(Craie.textSecondary)
             Spacer()
             Text(DictationTimings.format(seconds)).font(Craie.mono(12))
+        }
+    }
+
+    // MARK: Engine benchmark
+
+    private var benchmarkCandidates: [BenchmarkCandidate] {
+        var candidates: [BenchmarkCandidate] = []
+        let groqKey = appState.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let groqBase = appState.apiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !groqKey.isEmpty, !groqBase.isEmpty {
+            let host = URL(string: groqBase)?.host ?? "fournisseur"
+            for model in ["whisper-large-v3-turbo", "whisper-large-v3"] {
+                candidates.append(BenchmarkCandidate(label: "\(host) · \(model)", model: model, baseURL: groqBase, apiKey: groqKey))
+            }
+        }
+        let routerKey = appState.openRouterAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !routerKey.isEmpty {
+            candidates.append(BenchmarkCandidate(
+                label: "openrouter.ai · \(TranscriptionRouting.fishAudioModel)",
+                model: TranscriptionRouting.fishAudioModel,
+                baseURL: TranscriptionRouting.openRouterBaseURL,
+                apiKey: routerKey
+            ))
+        }
+        return candidates
+    }
+
+    private var fastestResultID: String? {
+        benchmark.results
+            .filter { $0.errorMessage == nil && $0.warmSeconds != nil }
+            .min { ($0.warmSeconds ?? .infinity) < ($1.warmSeconds ?? .infinity) }?.id
+    }
+
+    private var engineBenchmarkCard: some View {
+        CraieCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    CraieSectionLabel("Vitesse des moteurs de transcription")
+                    Spacer()
+                    Button(benchmark.isRunning ? "Mesure en cours…" : "Tester") {
+                        Task { await benchmark.run(candidates: benchmarkCandidates) }
+                    }
+                    .buttonStyle(CraiePillButtonStyle(kind: .action))
+                    .disabled(benchmark.isRunning || benchmarkCandidates.isEmpty)
+                }
+
+                if benchmarkCandidates.isEmpty {
+                    Text("Ajoutez une clé API (Groq ou OpenRouter) dans les réglages pour comparer les moteurs.")
+                        .font(Craie.texte)
+                        .foregroundStyle(Craie.textSecondary)
+                } else if benchmark.results.isEmpty {
+                    Text("Envoie un court clip synthétique (aucune de vos paroles) à chaque moteur configuré et mesure le temps de réponse. Cela consomme quelques secondes d'audio facturées.")
+                        .font(Craie.texte)
+                        .foregroundStyle(Craie.textSecondary)
+                } else {
+                    VStack(spacing: 10) {
+                        ForEach(benchmark.results) { result in
+                            benchmarkRow(result)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func benchmarkRow(_ result: BenchmarkResult) -> some View {
+        let isFastest = result.id == fastestResultID
+        let isCurrent = appState.transcriptionModel == result.candidate.model
+        return HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(result.candidate.label)
+                    .font(Craie.texte)
+                    .lineLimit(1)
+                if let error = result.errorMessage {
+                    Text(error)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Craie.signalText)
+                        .lineLimit(2)
+                } else if let cold = result.coldSeconds {
+                    Text("1re requête \(DictationTimings.format(cold))")
+                        .font(Craie.mono(11))
+                        .foregroundStyle(Craie.textTertiary)
+                }
+            }
+            Spacer()
+            if let warm = result.warmSeconds, result.errorMessage == nil {
+                Text(DictationTimings.format(warm))
+                    .font(Craie.mono(15, weight: .medium))
+                    .foregroundStyle(isFastest ? Craie.signalText : Craie.textPrimary)
+                if isCurrent {
+                    Text("actif").font(Craie.libelle).foregroundStyle(Craie.textTertiary)
+                } else {
+                    Button("Utiliser") { appState.transcriptionModel = result.candidate.model }
+                        .buttonStyle(CraiePillButtonStyle(kind: isFastest ? .action : .secondary))
+                }
+            } else if benchmark.isRunning && result.errorMessage == nil && result.warmSeconds == nil {
+                ProgressView().controlSize(.small)
+            }
         }
     }
 

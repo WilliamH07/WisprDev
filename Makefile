@@ -18,6 +18,7 @@ TEST_PRODUCTION_SOURCES = \
 	Sources/AsyncTimeout.swift \
 	Sources/DictationStatsCore.swift \
 	Sources/DictationTimings.swift \
+	Sources/SyntheticSpeechWAV.swift \
 	Sources/FocusedInputClassifier.swift \
 	Sources/LLMAPITransport.swift \
 	Sources/LLMCooldownManager.swift \

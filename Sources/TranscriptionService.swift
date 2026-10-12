@@ -44,6 +44,16 @@ class TranscriptionService {
         self.prompt = (trimmedPrompt?.isEmpty == false) ? trimmedPrompt : nil
     }
 
+    /// True when transcription runs on this Mac (selected explicitly, or no API key
+    /// is set and local Whisper binaries and a model are installed).
+    var usesLocalEngine: Bool {
+        if transcriptionModel == "whisper-local" { return true }
+        // Installed local binaries must not override an explicitly selected cloud
+        // model; they only serve as a fallback when no API key is configured.
+        return apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && LocalInferenceService.shared.isLocalWhisperAvailable
+    }
+
     static func responseFormat(forModel model: String) -> String {
         let normalizedModel = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return modelsSupportingVerboseJSON.contains(normalizedModel) ? "verbose_json" : "json"
@@ -78,7 +88,7 @@ class TranscriptionService {
         }
 
         // If local whisper is selected or local whisper is available
-        if transcriptionModel == "whisper-local" || LocalInferenceService.shared.isLocalWhisperAvailable {
+        if usesLocalEngine {
             do {
                 let localResult = try await LocalInferenceService.shared.transcribe(audioURL: fileURL, language: language, prompt: prompt)
                 if !localResult.isEmpty {
@@ -133,7 +143,7 @@ class TranscriptionService {
 
     // Send audio file for transcription and return text
     private func transcribeAudio(fileURL: URL) async throws -> String {
-        if transcriptionModel == "whisper-local" || LocalInferenceService.shared.isLocalWhisperAvailable {
+        if usesLocalEngine {
             return try await LocalInferenceService.shared.transcribe(audioURL: fileURL, language: language, prompt: prompt)
         }
         return try await transcribeAudioWithURLSession(fileURL: fileURL)
