@@ -237,6 +237,14 @@ struct StatsDashboardView: View {
                                 Spacer()
                                 Text("ignoré (phrase courte)").font(Craie.mono(12)).foregroundStyle(Craie.textTertiary)
                             }
+                        } else if timings.cleanupFellBackToRaw {
+                            HStack {
+                                Text("Nettoyage IA").font(Craie.texte).foregroundStyle(Craie.textSecondary)
+                                Spacer()
+                                Text("trop lent : texte brut (\(DictationTimings.format(timings.postProcessing)))")
+                                    .font(Craie.mono(12))
+                                    .foregroundStyle(Craie.signalText)
+                            }
                         } else {
                             timingRow("Nettoyage IA", timings.postProcessing)
                         }

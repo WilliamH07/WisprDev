@@ -755,6 +755,9 @@ Model: \(model)
             payload["max_completion_tokens"] = postProcessingMaxCompletionTokens
         }
         if isOpenRouter {
+            // Dictation is latency-critical: ask OpenRouter to route to the fastest
+            // provider instead of the cheapest, which removes most of the tail latency.
+            payload["provider"] = ["sort": "latency"]
             payload["reasoning"] = [
                 "effort": config.reasoningEffort ?? "none",
                 "exclude": true

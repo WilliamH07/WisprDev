@@ -5,6 +5,7 @@ struct LatencyTests {
         testTimeoutReturnsNilWithoutCancellingTask()
         testValueReturnedBeforeTimeout()
         testTimingsSummary()
+        testCleanupGate()
     }
 
     private static func blocking<T>(_ work: @escaping () async -> T) -> T {
@@ -44,5 +45,26 @@ struct LatencyTests {
         TestSupport.expectEqual(DictationTimings.format(1.5), "1.5 s")
         timings.skippedPostProcessing = true
         TestSupport.expect(timings.summary.contains("nettoyage ignoré"), "summary should flag skipped cleanup")
+    }
+
+    private static func testCleanupGate() {
+        let gate = CleanupLatencyGate(overrunsBeforePause: 2, pauseSeconds: 180)
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        TestSupport.expect(!gate.shouldSkipCleanup(now: t0), "fresh gate allows cleanup")
+        gate.recordOverrun(now: t0)
+        TestSupport.expect(!gate.shouldSkipCleanup(now: t0), "one overrun does not pause")
+        gate.recordOverrun(now: t0)
+        TestSupport.expect(gate.shouldSkipCleanup(now: t0.addingTimeInterval(60)), "two overruns pause cleanup")
+        TestSupport.expect(!gate.shouldSkipCleanup(now: t0.addingTimeInterval(181)), "pause ends and allows a probe")
+        gate.recordOverrun(now: t0.addingTimeInterval(182))
+        TestSupport.expect(gate.shouldSkipCleanup(now: t0.addingTimeInterval(183)), "a failed probe pauses again")
+        gate.recordSuccess()
+        TestSupport.expect(!gate.shouldSkipCleanup(now: t0.addingTimeInterval(184)), "success resets the gate")
+
+        UserDefaults.standard.removeObject(forKey: CleanupLatencyGate.budgetStorageKey)
+        TestSupport.expectApproximatelyEqual(CleanupLatencyGate.configuredBudgetSeconds, CleanupLatencyGate.defaultBudgetSeconds)
+        UserDefaults.standard.set(99.0, forKey: CleanupLatencyGate.budgetStorageKey)
+        TestSupport.expectApproximatelyEqual(CleanupLatencyGate.configuredBudgetSeconds, CleanupLatencyGate.budgetRange.upperBound)
+        UserDefaults.standard.removeObject(forKey: CleanupLatencyGate.budgetStorageKey)
     }
 }

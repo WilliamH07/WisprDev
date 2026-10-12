@@ -16,6 +16,7 @@ TEST_PRODUCTION_SOURCES = \
 	Sources/AppContextService.swift \
 	Sources/AppName.swift \
 	Sources/AsyncTimeout.swift \
+	Sources/CleanupLatencyGate.swift \
 	Sources/DictationStatsCore.swift \
 	Sources/DictationTimings.swift \
 	Sources/SyntheticSpeechWAV.swift \

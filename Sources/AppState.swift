@@ -3107,6 +3107,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         case postProcessingFailedFallback
         case preservedExactWording
         case fastPathShortDictation
+        case cleanupTooSlowFallback
+        case cleanupPausedFallback
         case preservedExactWordingTranslated
         case preservedExactWordingTranslationFailedFallback
         case commandModeSucceeded(invocation: CommandInvocation)
@@ -3126,6 +3128,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     : "Post-processing failed, using raw transcript"
             case .preservedExactWording:
                 return "Preserved exact wording, skipped post-processing"
+            case .cleanupTooSlowFallback:
+                return "Cleanup exceeded its time budget, using raw transcript"
+            case .cleanupPausedFallback:
+                return "Cleanup paused after repeated slow responses, using raw transcript"
             case .fastPathShortDictation:
                 return "Short dictation, skipped post-processing for speed"
             case .preservedExactWordingTranslated:
@@ -3219,16 +3225,41 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return (trimmedRawTranscript, .fastPathShortDictation, "")
         }
 
-        do {
-            let result = try await postProcessingService.postProcess(
-                transcript: trimmedRawTranscript,
-                context: context,
-                customVocabulary: customVocabulary,
-                customSystemPrompt: customSystemPrompt,
-                outputLanguage: outputLanguage
-            )
+        // Cleanup is optional polish: give it a hard time budget so a slow or erratic
+        // provider can never turn a ~1 s dictation into a 10 s one. If the provider
+        // keeps overrunning, cleanup is paused for a few minutes, then probed again.
+        let gate = CleanupLatencyGate.shared
+        if gate.shouldSkipCleanup() {
+            return (trimmedRawTranscript, .cleanupPausedFallback, "")
+        }
+        let cleanupTask = Task<Result<PostProcessingResult, Error>, Never> {
+            do {
+                let result = try await postProcessingService.postProcess(
+                    transcript: trimmedRawTranscript,
+                    context: context,
+                    customVocabulary: customVocabulary,
+                    customSystemPrompt: customSystemPrompt,
+                    outputLanguage: outputLanguage
+                )
+                return .success(result)
+            } catch {
+                return .failure(error)
+            }
+        }
+        guard let cleanupOutcome = await AsyncTimeout.value(
+            of: cleanupTask,
+            timeout: CleanupLatencyGate.configuredBudgetSeconds
+        ) else {
+            cleanupTask.cancel()
+            gate.recordOverrun()
+            os_log(.info, log: recordingLog, "Cleanup exceeded its %.1fs budget; using raw transcript", CleanupLatencyGate.configuredBudgetSeconds)
+            return (trimmedRawTranscript, .cleanupTooSlowFallback, "")
+        }
+        switch cleanupOutcome {
+        case .success(let result):
+            gate.recordSuccess()
             return (result.transcript, .postProcessingSucceeded, result.prompt)
-        } catch {
+        case .failure(let error):
             os_log(.error, log: recordingLog, "Post-processing failed: %{public}@", error.localizedDescription)
             return (trimmedRawTranscript, .postProcessingFailedFallback, "")
         }
@@ -3447,6 +3478,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     )
                     timings.postProcessing = CFAbsoluteTimeGetCurrent() - postProcessingStart
                     if case .fastPathShortDictation = result.outcome { timings.skippedPostProcessing = true }
+                    switch result.outcome {
+                    case .cleanupTooSlowFallback, .cleanupPausedFallback:
+                        timings.cleanupFellBackToRaw = true
+                    default:
+                        break
+                    }
                     let finishedTimings = timings
                     try Task.checkCancellation()
 

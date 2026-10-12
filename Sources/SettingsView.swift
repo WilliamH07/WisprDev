@@ -569,6 +569,7 @@ struct GeneralSettingsView: View {
     @Environment(\.openURL) private var openURL
     @AppStorage("show_menu_bar_icon") private var showMenuBarIcon = true
     @AppStorage(TranscriptFastPath.storageKey) private var fastPathShortDictation = true
+    @AppStorage(CleanupLatencyGate.budgetStorageKey) private var cleanupBudgetSeconds = CleanupLatencyGate.defaultBudgetSeconds
     @AppStorage(TranscriptFastPath.maxWordsStorageKey) private var fastPathMaxWords = TranscriptFastPath.defaultMaxWords
     @AppStorage("overlay_display_id") private var overlayDisplayID = 0
     @AppStorage("use_compact_overlay") private var useCompactOverlay = false
@@ -762,6 +763,16 @@ struct GeneralSettingsView: View {
                     )
                 }
             }
+
+            HStack {
+                Text("Délai max du nettoyage : \(String(format: "%.1f", cleanupBudgetSeconds)) s")
+                    .font(Craie.mono(12))
+                Slider(value: $cleanupBudgetSeconds, in: CleanupLatencyGate.budgetRange, step: 0.5)
+            }
+
+            Text("Au-delà de ce délai, le texte brut est collé sans attendre le nettoyage. Après deux dépassements de suite, le nettoyage est mis en pause 3 minutes pour garder des dictées rapides et régulières.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             Text("Les phrases d'au plus \(fastPathMaxWords) mots sont collées immédiatement, sans appel au modèle de nettoyage (plus le seuil est haut, plus c'est rapide, mais moins le texte est retouché). Désactivée automatiquement si une langue de sortie, un vocabulaire ou un prompt personnalisé est défini.")
                 .font(.caption)
