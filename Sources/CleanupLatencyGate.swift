@@ -9,13 +9,14 @@ final class CleanupLatencyGate: @unchecked Sendable {
     static let shared = CleanupLatencyGate()
 
     static let budgetStorageKey = "cleanup_budget_seconds"
-    static let defaultBudgetSeconds: TimeInterval = 2.0
     static let budgetRange: ClosedRange<Double> = 1.0...10.0
 
-    /// Time allowed for cleanup after the transcript is ready.
-    static var configuredBudgetSeconds: TimeInterval {
+    /// Opt-in safety net. `nil` (the default) means cleanup is never cut short: the
+    /// AI rewrite is always waited for. When the user enables a budget, cleanup that
+    /// takes longer falls back to the raw transcript.
+    static var configuredBudgetSeconds: TimeInterval? {
         let stored = UserDefaults.standard.double(forKey: budgetStorageKey)
-        guard stored > 0 else { return defaultBudgetSeconds }
+        guard stored > 0 else { return nil }
         return min(max(stored, budgetRange.lowerBound), budgetRange.upperBound)
     }
 

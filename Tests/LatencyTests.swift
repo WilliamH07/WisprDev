@@ -62,9 +62,9 @@ struct LatencyTests {
         TestSupport.expect(!gate.shouldSkipCleanup(now: t0.addingTimeInterval(184)), "success resets the gate")
 
         UserDefaults.standard.removeObject(forKey: CleanupLatencyGate.budgetStorageKey)
-        TestSupport.expectApproximatelyEqual(CleanupLatencyGate.configuredBudgetSeconds, CleanupLatencyGate.defaultBudgetSeconds)
+        TestSupport.expect(CleanupLatencyGate.configuredBudgetSeconds == nil, "budget is off by default")
         UserDefaults.standard.set(99.0, forKey: CleanupLatencyGate.budgetStorageKey)
-        TestSupport.expectApproximatelyEqual(CleanupLatencyGate.configuredBudgetSeconds, CleanupLatencyGate.budgetRange.upperBound)
+        TestSupport.expectApproximatelyEqual(CleanupLatencyGate.configuredBudgetSeconds ?? -1, CleanupLatencyGate.budgetRange.upperBound)
         UserDefaults.standard.removeObject(forKey: CleanupLatencyGate.budgetStorageKey)
     }
 }

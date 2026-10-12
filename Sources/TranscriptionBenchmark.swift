@@ -73,3 +73,100 @@ final class TranscriptionBenchmarkRunner: ObservableObject {
         isRunning = false
     }
 }
+
+// MARK: - Cleanup (rewrite) model benchmark
+
+struct CleanupCandidate: Identifiable, Equatable {
+    enum Provider: Equatable { case openRouter, groqCloud }
+    let label: String
+    let model: String
+    let baseURL: String
+    let apiKey: String
+    let provider: Provider
+    var id: String { "\(baseURL)|\(model)" }
+}
+
+struct CleanupBenchmarkResult: Identifiable, Equatable {
+    let candidate: CleanupCandidate
+    var samples: [TimeInterval] = []
+    var errorMessage: String?
+    var id: String { candidate.id }
+
+    var median: TimeInterval? { BenchmarkMath.median(samples) }
+    var worst: TimeInterval? { samples.max() }
+    /// A model that is fast on average but occasionally very slow is the failure mode to avoid.
+    var isErratic: Bool {
+        guard let median, let worst, median > 0 else { return false }
+        return worst > max(median * 3, 2.0)
+    }
+}
+
+/// Times the AI cleanup step on a fixed synthetic sentence, several times per model,
+/// so both the typical latency and the worst case (the variance) are visible.
+@MainActor
+final class CleanupBenchmarkRunner: ObservableObject {
+    @Published private(set) var results: [CleanupBenchmarkResult] = []
+    @Published private(set) var isRunning = false
+
+    private let runsPerModel = 6
+    private static let syntheticSentence =
+        "euh donc en fait je voulais dire que le déploiement est prévu demain matin et que on doit vérifier la config avant"
+
+    func run(candidates: [CleanupCandidate]) async {
+        guard !isRunning, !candidates.isEmpty else { return }
+        isRunning = true
+        results = candidates.map { CleanupBenchmarkResult(candidate: $0) }
+        for (index, candidate) in candidates.enumerated() {
+            do {
+                for _ in 0..<runsPerModel {
+                    let start = CFAbsoluteTimeGetCurrent()
+                    try await Self.request(candidate)
+                    results[index].samples.append(CFAbsoluteTimeGetCurrent() - start)
+                }
+            } catch {
+                results[index].errorMessage = error.localizedDescription
+            }
+        }
+        isRunning = false
+    }
+
+    private static func request(_ candidate: CleanupCandidate) async throws {
+        guard let url = URL(string: candidate.baseURL.trimmingCharacters(in: .whitespacesAndNewlines) + "/chat/completions") else {
+            throw URLError(.badURL)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+        request.setValue("Bearer \(candidate.apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let config = ModelConfiguration.config(for: candidate.model)
+        var payload: [String: Any] = [
+            "model": candidate.model,
+            "temperature": 0.0,
+            "messages": [
+                ["role": "system", "content": PostProcessingService.openRouterDictationSystemPrompt],
+                ["role": "user", "content": "Transcription vocale brute à formater :\n\(syntheticSentence)"]
+            ]
+        ]
+        if let maxTokens = config.maxCompletionTokens {
+            payload["max_completion_tokens"] = maxTokens
+        }
+        switch candidate.provider {
+        case .openRouter:
+            payload["provider"] = ["sort": "latency"]
+            payload["reasoning"] = ["effort": config.reasoningEffort ?? "none", "exclude": true]
+        case .groqCloud:
+            if let effort = config.reasoningEffort { payload["reasoning_effort"] = effort }
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        let (_, response) = try await LLMAPITransport.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw NSError(domain: "CleanupBenchmark", code: code, userInfo: [
+                NSLocalizedDescriptionKey: "Réponse HTTP \(code)"
+            ])
+        }
+    }
+}

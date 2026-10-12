@@ -1397,9 +1397,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
         if rewriteProvider == .openRouter && !openRouterAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let model = openRouterModel.trimmingCharacters(in: .whitespacesAndNewlines)
             let primary = model.isEmpty ? Self.defaultOpenRouterModel : model
-            let fallback = (primary == "nvidia/nemotron-3-super-120b-a12b:free")
-                ? "nex-agi/nex-n2.5-pro:free"
-                : "nvidia/nemotron-3-super-120b-a12b:free"
+            // The backup runs in parallel with the primary when it is slow, so it must be
+            // a fast model too (the old free 120B backup was itself slow and erratic).
+            let fallback = (primary == "openai/gpt-oss-20b")
+                ? "google/gemini-2.5-flash"
+                : "openai/gpt-oss-20b"
             return PostProcessingService(
                 apiKey: openRouterAPIKey.trimmingCharacters(in: .whitespacesAndNewlines),
                 baseURL: Self.defaultOpenRouterBaseURL,
@@ -3225,11 +3227,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return (trimmedRawTranscript, .fastPathShortDictation, "")
         }
 
-        // Cleanup is optional polish: give it a hard time budget so a slow or erratic
-        // provider can never turn a ~1 s dictation into a 10 s one. If the provider
-        // keeps overrunning, cleanup is paused for a few minutes, then probed again.
+        // Optional safety net (off by default): a hard time budget for cleanup. When
+        // enabled and the provider keeps overrunning, cleanup pauses for a few minutes.
         let gate = CleanupLatencyGate.shared
-        if gate.shouldSkipCleanup() {
+        if CleanupLatencyGate.configuredBudgetSeconds != nil, gate.shouldSkipCleanup() {
             return (trimmedRawTranscript, .cleanupPausedFallback, "")
         }
         let cleanupTask = Task<Result<PostProcessingResult, Error>, Never> {
@@ -3246,14 +3247,17 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 return .failure(error)
             }
         }
-        guard let cleanupOutcome = await AsyncTimeout.value(
-            of: cleanupTask,
-            timeout: CleanupLatencyGate.configuredBudgetSeconds
-        ) else {
-            cleanupTask.cancel()
-            gate.recordOverrun()
-            os_log(.info, log: recordingLog, "Cleanup exceeded its %.1fs budget; using raw transcript", CleanupLatencyGate.configuredBudgetSeconds)
-            return (trimmedRawTranscript, .cleanupTooSlowFallback, "")
+        let cleanupOutcome: Result<PostProcessingResult, Error>
+        if let budget = CleanupLatencyGate.configuredBudgetSeconds {
+            guard let timed = await AsyncTimeout.value(of: cleanupTask, timeout: budget) else {
+                cleanupTask.cancel()
+                gate.recordOverrun()
+                os_log(.info, log: recordingLog, "Cleanup exceeded its %.1fs budget; using raw transcript", budget)
+                return (trimmedRawTranscript, .cleanupTooSlowFallback, "")
+            }
+            cleanupOutcome = timed
+        } else {
+            cleanupOutcome = await cleanupTask.value
         }
         switch cleanupOutcome {
         case .success(let result):
