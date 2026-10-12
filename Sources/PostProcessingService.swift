@@ -435,6 +435,77 @@ Core behavior:
         }
     }
 
+    /// Seconds to wait for the primary model before also asking the second model.
+    private var hedgeDelaySeconds: TimeInterval {
+        let override = UserDefaults.standard.double(forKey: "cleanup_hedge_delay_seconds")
+        return override > 0 ? override : 1.2
+    }
+
+    private final class PrimaryFinishedSignal: @unchecked Sendable {
+        private let lock = NSLock()
+        private var finished = false
+        func mark() { lock.lock(); finished = true; lock.unlock() }
+        var isFinished: Bool { lock.lock(); defer { lock.unlock() }; return finished }
+    }
+
+    private func processHedged(
+        primary: String,
+        retry: String,
+        transcript: String,
+        contextSummary: String,
+        customVocabulary: [String],
+        customSystemPrompt: String,
+        outputLanguage: String
+    ) async throws -> PostProcessingResult {
+        let delay = hedgeDelaySeconds
+        let signal = PrimaryFinishedSignal()
+        return try await withThrowingTaskGroup(of: PostProcessingResult.self) { group in
+            group.addTask { [self] in
+                do {
+                    return try await process(
+                        transcript: transcript,
+                        contextSummary: contextSummary,
+                        model: primary,
+                        customVocabulary: customVocabulary,
+                        customSystemPrompt: customSystemPrompt,
+                        outputLanguage: outputLanguage
+                    )
+                } catch {
+                    signal.mark()
+                    throw error
+                }
+            }
+            group.addTask { [self] in
+                // Start early if the primary already failed, otherwise after the delay.
+                var waited: TimeInterval = 0
+                while waited < delay && !signal.isFinished {
+                    try await Task.sleep(nanoseconds: 50_000_000)
+                    waited += 0.05
+                }
+                return try await process(
+                    transcript: transcript,
+                    contextSummary: contextSummary,
+                    model: retry,
+                    customVocabulary: customVocabulary,
+                    customSystemPrompt: customSystemPrompt,
+                    outputLanguage: outputLanguage
+                )
+            }
+
+            var firstError: Error?
+            while true {
+                do {
+                    guard let result = try await group.next() else { break }
+                    group.cancelAll()
+                    return result
+                } catch {
+                    if firstError == nil { firstError = error }
+                }
+            }
+            throw firstError ?? PostProcessingError.invalidResponse("No post-processing result")
+        }
+    }
+
     private func processWithFallback(
         transcript: String,
         contextSummary: String,
@@ -453,7 +524,24 @@ Core behavior:
         }
         primaryModel = availableModel
 
+        var didHedge = false
         do {
+            // Hedged request: if the primary model has not answered after a short delay
+            // (or fails sooner), the second model starts in parallel and the first valid
+            // answer wins. This keeps the AI cleanup but removes the "wait for the primary
+            // to time out, then try the backup" worst case.
+            if let retryModel, retryModel != primaryModel {
+                didHedge = true
+                return try await processHedged(
+                    primary: primaryModel,
+                    retry: retryModel,
+                    transcript: transcript,
+                    contextSummary: contextSummary,
+                    customVocabulary: customVocabulary,
+                    customSystemPrompt: customSystemPrompt,
+                    outputLanguage: outputLanguage
+                )
+            }
             return try await process(
                 transcript: transcript,
                 contextSummary: contextSummary,
@@ -463,6 +551,16 @@ Core behavior:
                 outputLanguage: outputLanguage
             )
         } catch {
+            if didHedge {
+                // Both models were already tried in parallel; do not retry a third time.
+                if case .suspectedInstructionExecution = error as? PostProcessingError {
+                    return PostProcessingResult(
+                        transcript: transcript.trimmingCharacters(in: .whitespacesAndNewlines),
+                        prompt: ""
+                    )
+                }
+                throw error
+            }
             // Unified fallback policy: decide whether to retry on the other model.
             let shouldFallback: Bool
             if let postError = error as? PostProcessingError {
@@ -755,6 +853,9 @@ Model: \(model)
             payload["max_completion_tokens"] = postProcessingMaxCompletionTokens
         }
         if isOpenRouter {
+            // Dictation is latency-critical: ask OpenRouter to route to the fastest
+            // provider instead of the cheapest, which removes most of the tail latency.
+            payload["provider"] = ["sort": "latency"]
             payload["reasoning"] = [
                 "effort": config.reasoningEffort ?? "none",
                 "exclude": true

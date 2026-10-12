@@ -1397,9 +1397,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
         if rewriteProvider == .openRouter && !openRouterAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let model = openRouterModel.trimmingCharacters(in: .whitespacesAndNewlines)
             let primary = model.isEmpty ? Self.defaultOpenRouterModel : model
-            let fallback = (primary == "nvidia/nemotron-3-super-120b-a12b:free")
-                ? "nex-agi/nex-n2.5-pro:free"
-                : "nvidia/nemotron-3-super-120b-a12b:free"
+            // The backup runs in parallel with the primary when it is slow, so it must be
+            // a fast model too (the old free 120B backup was itself slow and erratic).
+            let fallback = (primary == "openai/gpt-oss-20b")
+                ? "google/gemini-2.5-flash"
+                : "openai/gpt-oss-20b"
             return PostProcessingService(
                 apiKey: openRouterAPIKey.trimmingCharacters(in: .whitespacesAndNewlines),
                 baseURL: Self.defaultOpenRouterBaseURL,
@@ -3107,6 +3109,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         case postProcessingFailedFallback
         case preservedExactWording
         case fastPathShortDictation
+        case cleanupTooSlowFallback
+        case cleanupPausedFallback
         case preservedExactWordingTranslated
         case preservedExactWordingTranslationFailedFallback
         case commandModeSucceeded(invocation: CommandInvocation)
@@ -3126,6 +3130,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     : "Post-processing failed, using raw transcript"
             case .preservedExactWording:
                 return "Preserved exact wording, skipped post-processing"
+            case .cleanupTooSlowFallback:
+                return "Cleanup exceeded its time budget, using raw transcript"
+            case .cleanupPausedFallback:
+                return "Cleanup paused after repeated slow responses, using raw transcript"
             case .fastPathShortDictation:
                 return "Short dictation, skipped post-processing for speed"
             case .preservedExactWordingTranslated:
@@ -3219,16 +3227,43 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return (trimmedRawTranscript, .fastPathShortDictation, "")
         }
 
-        do {
-            let result = try await postProcessingService.postProcess(
-                transcript: trimmedRawTranscript,
-                context: context,
-                customVocabulary: customVocabulary,
-                customSystemPrompt: customSystemPrompt,
-                outputLanguage: outputLanguage
-            )
+        // Optional safety net (off by default): a hard time budget for cleanup. When
+        // enabled and the provider keeps overrunning, cleanup pauses for a few minutes.
+        let gate = CleanupLatencyGate.shared
+        if CleanupLatencyGate.configuredBudgetSeconds != nil, gate.shouldSkipCleanup() {
+            return (trimmedRawTranscript, .cleanupPausedFallback, "")
+        }
+        let cleanupTask = Task<Result<PostProcessingResult, Error>, Never> {
+            do {
+                let result = try await postProcessingService.postProcess(
+                    transcript: trimmedRawTranscript,
+                    context: context,
+                    customVocabulary: customVocabulary,
+                    customSystemPrompt: customSystemPrompt,
+                    outputLanguage: outputLanguage
+                )
+                return .success(result)
+            } catch {
+                return .failure(error)
+            }
+        }
+        let cleanupOutcome: Result<PostProcessingResult, Error>
+        if let budget = CleanupLatencyGate.configuredBudgetSeconds {
+            guard let timed = await AsyncTimeout.value(of: cleanupTask, timeout: budget) else {
+                cleanupTask.cancel()
+                gate.recordOverrun()
+                os_log(.info, log: recordingLog, "Cleanup exceeded its %.1fs budget; using raw transcript", budget)
+                return (trimmedRawTranscript, .cleanupTooSlowFallback, "")
+            }
+            cleanupOutcome = timed
+        } else {
+            cleanupOutcome = await cleanupTask.value
+        }
+        switch cleanupOutcome {
+        case .success(let result):
+            gate.recordSuccess()
             return (result.transcript, .postProcessingSucceeded, result.prompt)
-        } catch {
+        case .failure(let error):
             os_log(.error, log: recordingLog, "Post-processing failed: %{public}@", error.localizedDescription)
             return (trimmedRawTranscript, .postProcessingFailedFallback, "")
         }
@@ -3447,6 +3482,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     )
                     timings.postProcessing = CFAbsoluteTimeGetCurrent() - postProcessingStart
                     if case .fastPathShortDictation = result.outcome { timings.skippedPostProcessing = true }
+                    switch result.outcome {
+                    case .cleanupTooSlowFallback, .cleanupPausedFallback:
+                        timings.cleanupFellBackToRaw = true
+                    default:
+                        break
+                    }
                     let finishedTimings = timings
                     try Task.checkCancellation()
 

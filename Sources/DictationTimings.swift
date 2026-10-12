@@ -8,6 +8,8 @@ struct DictationTimings: Equatable {
     var contextWait: TimeInterval = 0
     var postProcessing: TimeInterval = 0
     var skippedPostProcessing = false
+    /// Cleanup exceeded its time budget (or was paused after repeated overruns) and the raw transcript was used.
+    var cleanupFellBackToRaw = false
     /// Which transcription engine ran (e.g. "Whisper local · serveur résident"). No user content.
     var engine = ""
 
@@ -24,5 +26,6 @@ struct DictationTimings: Equatable {
         "Total \(Self.format(total)) · transcription \(Self.format(transcription))"
             + (engine.isEmpty ? "" : " [\(engine)]")
             + (skippedPostProcessing ? " · nettoyage ignoré" : " · nettoyage \(Self.format(postProcessing))")
+            + (cleanupFellBackToRaw ? " (texte brut)" : "")
     }
 }

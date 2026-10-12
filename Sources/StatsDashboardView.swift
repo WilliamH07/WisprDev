@@ -10,6 +10,7 @@ struct StatsDashboardView: View {
     @State private var hoveredDay: DictationStatsSnapshot.DayPoint?
     @State private var showResetConfirmation = false
     @StateObject private var benchmark = TranscriptionBenchmarkRunner()
+    @StateObject private var cleanupBenchmark = CleanupBenchmarkRunner()
 
     private let tileColumns = [GridItem(.adaptive(minimum: 160), spacing: 12)]
 
@@ -42,6 +43,7 @@ struct StatsDashboardView: View {
 
                 latencyCard
                 engineBenchmarkCard
+                cleanupBenchmarkCard
                 privacyFooter
             }
             .padding(28)
@@ -237,6 +239,14 @@ struct StatsDashboardView: View {
                                 Spacer()
                                 Text("ignoré (phrase courte)").font(Craie.mono(12)).foregroundStyle(Craie.textTertiary)
                             }
+                        } else if timings.cleanupFellBackToRaw {
+                            HStack {
+                                Text("Nettoyage IA").font(Craie.texte).foregroundStyle(Craie.textSecondary)
+                                Spacer()
+                                Text("trop lent : texte brut (\(DictationTimings.format(timings.postProcessing)))")
+                                    .font(Craie.mono(12))
+                                    .foregroundStyle(Craie.signalText)
+                            }
                         } else {
                             timingRow("Nettoyage IA", timings.postProcessing)
                         }
@@ -353,6 +363,115 @@ struct StatsDashboardView: View {
             } else if benchmark.isRunning && result.errorMessage == nil && result.warmSeconds == nil {
                 ProgressView().controlSize(.small)
             }
+        }
+    }
+
+    // MARK: Cleanup benchmark
+
+    private var cleanupCandidates: [CleanupCandidate] {
+        var candidates: [CleanupCandidate] = []
+        let routerKey = appState.openRouterAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !routerKey.isEmpty {
+            for model in ["openai/gpt-oss-20b", "google/gemini-2.5-flash", "google/gemini-2.5-flash-lite"] {
+                candidates.append(CleanupCandidate(
+                    label: "OpenRouter · \(model)", model: model,
+                    baseURL: TranscriptionRouting.openRouterBaseURL, apiKey: routerKey, provider: .openRouter
+                ))
+            }
+        }
+        let groqKey = appState.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let groqBase = appState.apiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !groqKey.isEmpty, !groqBase.isEmpty {
+            candidates.append(CleanupCandidate(
+                label: "\(URL(string: groqBase)?.host ?? "Groq") · openai/gpt-oss-20b", model: "openai/gpt-oss-20b",
+                baseURL: groqBase, apiKey: groqKey, provider: .groqCloud
+            ))
+        }
+        return candidates
+    }
+
+    private var mostRegularCleanupID: String? {
+        cleanupBenchmark.results
+            .filter { $0.errorMessage == nil && $0.median != nil && !$0.isErratic }
+            .min { ($0.median ?? .infinity) < ($1.median ?? .infinity) }?.id
+    }
+
+    private var cleanupBenchmarkCard: some View {
+        CraieCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    CraieSectionLabel("Vitesse et régularité de la réécriture IA")
+                    Spacer()
+                    Button(cleanupBenchmark.isRunning ? "Mesure en cours…" : "Tester") {
+                        Task { await cleanupBenchmark.run(candidates: cleanupCandidates) }
+                    }
+                    .buttonStyle(CraiePillButtonStyle(kind: .action))
+                    .disabled(cleanupBenchmark.isRunning || cleanupCandidates.isEmpty)
+                }
+                if cleanupCandidates.isEmpty {
+                    Text("Ajoutez une clé OpenRouter ou Groq dans les réglages pour comparer les modèles de réécriture.")
+                        .font(Craie.texte)
+                        .foregroundStyle(Craie.textSecondary)
+                } else if cleanupBenchmark.results.isEmpty {
+                    Text("Envoie 6 fois une phrase de test inventée à chaque modèle et affiche la médiane et le pire cas : un bon modèle est rapide ET régulier.")
+                        .font(Craie.texte)
+                        .foregroundStyle(Craie.textSecondary)
+                } else {
+                    VStack(spacing: 10) {
+                        ForEach(cleanupBenchmark.results) { cleanupRow($0) }
+                    }
+                }
+            }
+        }
+    }
+
+    private func isActiveCleanup(_ candidate: CleanupCandidate) -> Bool {
+        switch candidate.provider {
+        case .openRouter:
+            return appState.rewriteProvider == .openRouter && appState.openRouterModel == candidate.model
+        case .groqCloud:
+            return appState.rewriteProvider == .groqCloud && appState.postProcessingModel == candidate.model
+        }
+    }
+
+    private func cleanupRow(_ result: CleanupBenchmarkResult) -> some View {
+        let best = result.id == mostRegularCleanupID
+        return HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(result.candidate.label).font(Craie.texte).lineLimit(1)
+                if let error = result.errorMessage {
+                    Text(error).font(.system(size: 11)).foregroundStyle(Craie.signalText).lineLimit(2)
+                } else if let worst = result.worst {
+                    Text("pire cas \(DictationTimings.format(worst))" + (result.isErratic ? " · irrégulier" : ""))
+                        .font(Craie.mono(11))
+                        .foregroundStyle(result.isErratic ? Craie.signalText : Craie.textTertiary)
+                }
+            }
+            Spacer()
+            if let median = result.median, result.errorMessage == nil {
+                Text(DictationTimings.format(median))
+                    .font(Craie.mono(15, weight: .medium))
+                    .foregroundStyle(best ? Craie.signalText : Craie.textPrimary)
+                if isActiveCleanup(result.candidate) {
+                    Text("actif").font(Craie.libelle).foregroundStyle(Craie.textTertiary)
+                } else {
+                    Button("Utiliser") { useCleanup(result.candidate) }
+                        .buttonStyle(CraiePillButtonStyle(kind: best ? .action : .secondary))
+                }
+            } else if cleanupBenchmark.isRunning && result.errorMessage == nil {
+                ProgressView().controlSize(.small)
+            }
+        }
+    }
+
+    private func useCleanup(_ candidate: CleanupCandidate) {
+        switch candidate.provider {
+        case .openRouter:
+            appState.rewriteProvider = .openRouter
+            appState.openRouterModel = candidate.model
+        case .groqCloud:
+            appState.rewriteProvider = .groqCloud
+            appState.postProcessingModel = candidate.model
         }
     }
 
