@@ -569,6 +569,7 @@ struct GeneralSettingsView: View {
     @Environment(\.openURL) private var openURL
     @AppStorage("show_menu_bar_icon") private var showMenuBarIcon = true
     @AppStorage(TranscriptFastPath.storageKey) private var fastPathShortDictation = true
+    @AppStorage(TranscriptFastPath.maxWordsStorageKey) private var fastPathMaxWords = TranscriptFastPath.defaultMaxWords
     @AppStorage("overlay_display_id") private var overlayDisplayID = 0
     @AppStorage("use_compact_overlay") private var useCompactOverlay = false
     @AppStorage("overlay_glass_style") private var overlayGlassStyle = OverlayGlassStyle.liquidGlass.rawValue
@@ -747,7 +748,22 @@ struct GeneralSettingsView: View {
 
             Toggle("Dictée rapide (phrases courtes sans nettoyage IA)", isOn: $fastPathShortDictation)
 
-            Text("Les phrases de 6 mots ou moins sont collées immédiatement, sans appel au modèle de nettoyage. Désactivée automatiquement si une langue de sortie, un vocabulaire ou un prompt personnalisé est défini.")
+            if fastPathShortDictation {
+                HStack {
+                    Text("Seuil : \(fastPathMaxWords) mots")
+                        .font(Craie.mono(12))
+                    Slider(
+                        value: Binding(
+                            get: { Double(fastPathMaxWords) },
+                            set: { fastPathMaxWords = Int($0.rounded()) }
+                        ),
+                        in: Double(TranscriptFastPath.maxWordsRange.lowerBound)...Double(TranscriptFastPath.maxWordsRange.upperBound),
+                        step: 1
+                    )
+                }
+            }
+
+            Text("Les phrases d'au plus \(fastPathMaxWords) mots sont collées immédiatement, sans appel au modèle de nettoyage (plus le seuil est haut, plus c'est rapide, mais moins le texte est retouché). Désactivée automatiquement si une langue de sortie, un vocabulaire ou un prompt personnalisé est défini.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 

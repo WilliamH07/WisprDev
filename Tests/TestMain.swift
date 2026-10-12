@@ -17,6 +17,7 @@ struct WisperTests {
         DictationStatsTests.run()
         FocusedInputClassifierTests.run()
         LatencyTests.run()
+        BenchmarkTests.run()
         print("WisperTests passed")
     }
 }
