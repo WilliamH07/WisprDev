@@ -19,6 +19,7 @@ struct WisperTests {
         LatencyTests.run()
         BenchmarkTests.run()
         ChunkedTranscriberTests.run()
+        SelectionGateTests.run()
         print("WisperTests passed")
     }
 }

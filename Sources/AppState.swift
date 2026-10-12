@@ -2254,15 +2254,26 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func executeRewriteSelectedText() async {
         isRewritingText = true
 
-        // 1. Attempt to grab selected text via Accessibility API
-        let selectionSnapshot = contextService.collectSelectionSnapshot()
-        var selectedText = selectionSnapshot.selectedText?.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 1. Verify that something is really selected before doing anything else.
+        //    A confirmed empty selection stops here: no keystroke, no request.
+        var selectedText: String?
+        var shouldTryClipboardCopy = false
         var preservedClipboardForFallback: PreservedPasteboardSnapshot? = nil
 
-        os_log(.info, log: recordingLog, "executeRewriteSelectedText: AX selectedText found=%{public}d", selectedText != nil && selectedText?.isEmpty == false)
+        switch SelectionGate.decide(contextService.collectSelectionEvidence()) {
+        case .rewrite(let text):
+            selectedText = text
+        case .abortNoSelection:
+            break
+        case .tryClipboardCopy:
+            shouldTryClipboardCopy = true
+        }
 
-        // 2. If Accessibility returned empty (common in web browsers/Electron), fall back to Cmd+C
-        if selectedText == nil || selectedText?.isEmpty == true {
+        os_log(.info, log: recordingLog, "executeRewriteSelectedText: AX selection found=%{public}d tryClipboard=%{public}d", selectedText != nil, shouldTryClipboardCopy)
+
+        // 2. Only when the app does not expose its selection (common in web browsers/Electron),
+        //    fall back to Cmd+C
+        if shouldTryClipboardCopy {
             // Wait for user to release the trigger shortcut so held keys/modifiers don't interfere with synthetic Cmd+C
             await waitForShortcutInputsReleased()
 
@@ -2280,11 +2291,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 }
             }
 
-            if pasteboard.changeCount != initialChangeCount,
-               let copied = pasteboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !copied.isEmpty {
-                selectedText = copied
-            }
+            selectedText = SelectionGate.usableCopiedText(
+                copied: pasteboard.string(forType: .string),
+                changeCountChanged: pasteboard.changeCount != initialChangeCount
+            )
             os_log(.info, log: recordingLog, "executeRewriteSelectedText: fallback copy selectedText found=%{public}d", selectedText != nil && selectedText?.isEmpty == false)
         }
 

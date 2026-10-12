@@ -23,6 +23,7 @@ TEST_PRODUCTION_SOURCES = \
 	Sources/SyntheticSpeechWAV.swift \
 	Sources/FocusedInputClassifier.swift \
 	Sources/LLMAPITransport.swift \
+	Sources/SelectionGate.swift \
 	Sources/LLMCooldownManager.swift \
 	Sources/ModelConfiguration.swift \
 	Sources/TranscriptionErrorPresentationCore.swift \
