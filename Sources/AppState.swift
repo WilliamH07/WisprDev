@@ -26,6 +26,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case general
     case shortcuts
     case ai
+    case safariAgent
     case audio
     case prompts
     case macros
@@ -47,6 +48,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .general: return "Général"
         case .shortcuts: return "Raccourcis"
         case .ai: return "Intelligence IA"
+        case .safariAgent: return "Agent Safari"
         case .audio: return "Audio & Voix"
         case .prompts: return "Prompts"
         case .macros: return "Macros Vocales"
@@ -62,6 +64,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .general: return "gearshape"
         case .shortcuts: return "keyboard"
         case .ai: return "sparkles"
+        case .safariAgent: return "safari"
         case .audio: return "mic"
         case .prompts: return "text.bubble"
         case .macros: return "music.mic"

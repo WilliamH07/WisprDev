@@ -31,6 +31,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // The Safari agent only listens when the user enabled it in Settings.
+        let appState = self.appState
+        Task { @MainActor in
+            SafariAgentService.shared.configure(
+                apiKeyProvider: { appState.openRouterAPIKey },
+                defaultModelProvider: { appState.aiAssistantModel }
+            )
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

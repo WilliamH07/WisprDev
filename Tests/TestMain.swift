@@ -20,6 +20,8 @@ struct WisperTests {
         BenchmarkTests.run()
         ChunkedTranscriberTests.run()
         SelectionGateTests.run()
+        SafariAgentTests.run()
+        SafariAgentScriptTests.run()
         print("WisperTests passed")
     }
 }

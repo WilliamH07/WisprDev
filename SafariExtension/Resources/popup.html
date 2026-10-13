@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="light dark">
+  <title>Wisper Agent</title>
+  <style>
+    body { font: 13px/1.4 -apple-system, BlinkMacSystemFont, sans-serif; width: 320px; margin: 0; padding: 14px; }
+    h1 { font-size: 14px; margin: 0 0 8px; }
+    p { margin: 0 0 10px; color: #666; font-size: 12px; }
+    textarea { width: 100%; box-sizing: border-box; font: 11px ui-monospace, Menlo, monospace; height: 54px; resize: none; }
+    .row { display: flex; gap: 8px; margin-top: 8px; }
+    button { font: inherit; }
+    #status { margin-top: 10px; font-size: 12px; }
+    .ok { color: #1b8a3a; }
+    .error { color: #c62828; }
+    @media (prefers-color-scheme: dark) { p { color: #aaa; } }
+  </style>
+</head>
+<body>
+  <h1>Wisper Agent</h1>
+  <p>Collez le code d'appairage affiché dans Wisper → Réglages → Agent Safari. Ensuite, appuyez deux fois sur Ctrl sur n'importe quelle page.</p>
+  <textarea id="code" placeholder="wisper-agent:47821:…" spellcheck="false"></textarea>
+  <div class="row">
+    <button id="pair">Associer</button>
+    <button id="unpair">Dissocier</button>
+  </div>
+  <div id="status"></div>
+  <script src="agent-core.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

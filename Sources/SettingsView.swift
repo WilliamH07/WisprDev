@@ -470,6 +470,8 @@ struct SettingsView: View {
                     ShortcutsSettingsView()
                 case .ai:
                     AISettingsView()
+                case .safariAgent:
+                    SafariAgentSettingsView()
                 case .audio:
                     AudioSettingsView()
                 case .prompts:
