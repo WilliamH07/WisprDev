@@ -16,6 +16,9 @@ that architecture unless the user explicitly approves a migration.
 - `Sources/ShortcutCore/`: shortcut models, matching, and session behavior.
 - `Sources/PipelineHistoryStore.swift`: local pipeline history.
 - `Sources/UpdateManager.swift`: update and release behavior.
+- `Sources/SafariAgent/` and `SafariExtension/`: Safari agent (loopback
+  server, page and PDF context, in-page extension built with
+  `make SAFARI_AGENT=1`).
 - `Sources/SettingsView.swift`, `Sources/SetupView.swift`, and other SwiftUI
   files: user interface.
 - `Tests/`: dependency-free executable tests.

@@ -136,6 +136,40 @@ final class AIAssistantService {
         apiKey: String,
         memories: [SemanticSearchResult]? = nil
     ) -> AsyncThrowingStream<String, Error> {
+        streamChatCompletion(model: model, apiKey: apiKey) { [self] in
+            let systemPrompt = self.buildSystemPrompt(for: prompt, memories: memories)
+
+            var userContent: [[String: Any]] = [
+                [
+                    "type": "text",
+                    "text": prompt
+                ]
+            ]
+
+            if let image, let dataURL = self.makeBase64DataURL(from: image) {
+                userContent.append([
+                    "type": "image_url",
+                    "image_url": ["url": dataURL]
+                ])
+            }
+
+            return [
+                ["role": "system", "content": systemPrompt],
+                ["role": "user", "content": userContent]
+            ]
+        }
+    }
+
+    /// Streams an OpenRouter chat completion for prebuilt messages. Shared by
+    /// the assistant panel and the Safari agent so both get the same quota
+    /// handling, keep-alive transport and SSE parsing. `makeMessages` runs on
+    /// the streaming task, off the caller's thread.
+    func streamChatCompletion(
+        model: String,
+        apiKey: String,
+        extraPayload: [String: Any] = [:],
+        makeMessages: @escaping () -> [[String: Any]]
+    ) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -174,33 +208,15 @@ final class AIAssistantService {
                     request.setValue("Wisper", forHTTPHeaderField: "X-Title")
                     request.timeoutInterval = self.requestTimeoutSeconds * 1.5
 
-                    let systemPrompt = self.buildSystemPrompt(for: prompt, memories: memories)
+                    let messages = makeMessages()
 
-                    var userContent: [[String: Any]] = [
-                        [
-                            "type": "text",
-                            "text": prompt
-                        ]
-                    ]
-
-                    if let image, let dataURL = self.makeBase64DataURL(from: image) {
-                        userContent.append([
-                            "type": "image_url",
-                            "image_url": ["url": dataURL]
-                        ])
-                    }
-
-                    let messages: [[String: Any]] = [
-                        ["role": "system", "content": systemPrompt],
-                        ["role": "user", "content": userContent]
-                    ]
-
-                    let payload: [String: Any] = [
+                    var payload: [String: Any] = [
                         "model": model,
                         "messages": messages,
                         "temperature": 0.3,
                         "stream": true
                     ]
+                    payload.merge(extraPayload) { _, extra in extra }
 
                     request.httpBody = try JSONSerialization.data(withJSONObject: payload)
 

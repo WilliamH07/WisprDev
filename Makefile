@@ -11,6 +11,19 @@ APP_EXECUTABLE = $(MACOS_DIR)/$(APP_NAME)
 APP_EXECUTABLE_TARGET := $(subst $(space),\ ,$(APP_EXECUTABLE))
 
 SOURCES = $(shell find Sources -name '*.swift' -type f | LC_ALL=C sort)
+
+# Safari agent extension (personal use, unsigned): embedded only with
+# `make SAFARI_AGENT=1`. Release builds leave it out.
+SAFARI_AGENT ?= 0
+SAFARI_EXTENSION_EXECUTABLE = WisperSafariAgent
+SAFARI_APPEX = $(CONTENTS)/PlugIns/$(SAFARI_EXTENSION_EXECUTABLE).appex
+SAFARI_EXTENSION_SOURCES = SafariExtension/SafariWebExtensionHandler.swift
+SAFARI_EXTENSION_FILES = $(shell find SafariExtension -type f | LC_ALL=C sort)
+SAFARI_EXTENSION_ARCHS = $(if $(filter universal,$(ARCH)),arm64 x86_64,$(ARCH))
+SAFARI_AGENT_STAMP = $(BUILD_DIR)/.safari-agent-$(SAFARI_AGENT)
+ifeq ($(SAFARI_AGENT),1)
+SAFARI_AGENT_DEPS = $(SAFARI_EXTENSION_FILES)
+endif
 TEST_RUNNER = $(BUILD_DIR)/WisperTests
 TEST_PRODUCTION_SOURCES = \
 	Sources/AppContextService.swift \
@@ -40,7 +53,12 @@ TEST_PRODUCTION_SOURCES = \
 	Sources/HapticFeedbackService.swift \
 	Sources/SemanticMemoryModels.swift \
 	Sources/SemanticMemoryStore.swift \
-	Sources/SemanticMemoryService.swift
+	Sources/SemanticMemoryService.swift \
+	Sources/SafariAgent/SafariAgentHTTP.swift \
+	Sources/SafariAgent/SafariAgentSecurity.swift \
+	Sources/SafariAgent/SafariAgentText.swift \
+	Sources/SafariAgent/SafariAgentPrompt.swift \
+	Sources/SafariAgent/ReferenceLibraryCore.swift
 TEST_SOURCES = $(shell find Tests -name '*.swift' -type f | LC_ALL=C sort)
 SHELL_SCRIPTS = $(shell find .github/scripts .agents/skills -name '*.sh' -type f | LC_ALL=C sort)
 YAML_FILES = $(shell find .github -type f \( -name '*.yml' -o -name '*.yaml' \) | LC_ALL=C sort)
@@ -62,7 +80,7 @@ endif
 
 all: $(APP_EXECUTABLE_TARGET)
 
-$(APP_EXECUTABLE_TARGET): $(SOURCES) Info.plist $(ICON_ICNS)
+$(APP_EXECUTABLE_TARGET): $(SOURCES) Info.plist $(ICON_ICNS) $(SAFARI_AGENT_STAMP) $(SAFARI_AGENT_DEPS)
 	@mkdir -p "$(MACOS_DIR)" "$(RESOURCES)"
 ifeq ($(ARCH),universal)
 	swiftc \
@@ -97,8 +115,38 @@ endif
 	@cp $(ICON_ICNS) "$(RESOURCES)/AppIcon.icns"
 	@plutil -replace NSMicrophoneUsageDescription -string "$(APP_NAME) needs microphone access to transcribe your speech." "$(CONTENTS)/Info.plist"
 	@plutil -replace NSSpeechRecognitionUsageDescription -string "$(APP_NAME) needs speech recognition to convert your voice to text." "$(CONTENTS)/Info.plist"
+	@rm -rf "$(CONTENTS)/PlugIns"
+ifeq ($(SAFARI_AGENT),1)
+	@mkdir -p "$(SAFARI_APPEX)/Contents/MacOS" "$(SAFARI_APPEX)/Contents/Resources/images"
+	@set -e; for arch in $(SAFARI_EXTENSION_ARCHS); do \
+		swiftc \
+			-parse-as-library \
+			-application-extension \
+			-module-name $(SAFARI_EXTENSION_EXECUTABLE) \
+			-sdk "$$(xcrun --show-sdk-path)" \
+			-target $$arch-apple-macosx13.0 \
+			-Xlinker -e -Xlinker _NSExtensionMain \
+			-o "$(BUILD_DIR)/$(SAFARI_EXTENSION_EXECUTABLE)-$$arch" \
+			$(SAFARI_EXTENSION_SOURCES); \
+	done
+	@lipo -create -output "$(SAFARI_APPEX)/Contents/MacOS/$(SAFARI_EXTENSION_EXECUTABLE)" $(foreach arch,$(SAFARI_EXTENSION_ARCHS),"$(BUILD_DIR)/$(SAFARI_EXTENSION_EXECUTABLE)-$(arch)")
+	@rm -f $(foreach arch,$(SAFARI_EXTENSION_ARCHS),"$(BUILD_DIR)/$(SAFARI_EXTENSION_EXECUTABLE)-$(arch)")
+	@cp SafariExtension/Info.plist "$(SAFARI_APPEX)/Contents/Info.plist"
+	@plutil -replace CFBundleIdentifier -string "$(BUNDLE_ID).SafariAgent" "$(SAFARI_APPEX)/Contents/Info.plist"
+	@cp SafariExtension/Resources/*.js SafariExtension/Resources/*.json SafariExtension/Resources/*.html "$(SAFARI_APPEX)/Contents/Resources/"
+	@for size in 48 96 128; do sips -z $$size $$size $(ICON_SOURCE) --out "$(SAFARI_APPEX)/Contents/Resources/images/icon-$$size.png" > /dev/null; done
+	@codesign --force --options runtime --sign "$(CODESIGN_IDENTITY)" --entitlements SafariExtension/SafariAgent.entitlements "$(SAFARI_APPEX)"
+	@echo "Embedded Safari agent extension"
+endif
 	@codesign --force --options runtime --sign "$(CODESIGN_IDENTITY)" -r="designated => identifier \"$(BUNDLE_ID)\"" --entitlements Wisper.entitlements "$(APP_BUNDLE)"
 	@echo "Built $(APP_BUNDLE)"
+
+# Records which SAFARI_AGENT value the bundle was built with, so switching
+# the flag rebuilds the app with or without the extension.
+$(BUILD_DIR)/.safari-agent-%:
+	@mkdir -p "$(BUILD_DIR)"
+	@rm -f $(BUILD_DIR)/.safari-agent-*
+	@touch $@
 
 install: all
 	@pkill -f "$(APP_NAME)" 2>/dev/null || true
@@ -115,6 +163,13 @@ typecheck:
 		-sdk $(shell xcrun --show-sdk-path) \
 		-target $(ARCH)-apple-macosx13.0 \
 		$(SOURCES)
+	swiftc \
+		-parse-as-library \
+		-application-extension \
+		-typecheck \
+		-sdk $(shell xcrun --show-sdk-path) \
+		-target $(ARCH)-apple-macosx13.0 \
+		$(SAFARI_EXTENSION_SOURCES)
 
 test:
 	@mkdir -p "$(BUILD_DIR)"
@@ -129,7 +184,8 @@ test:
 	@$(TEST_RUNNER)
 
 validate:
-	plutil -lint Info.plist Wisper.entitlements
+	plutil -lint Info.plist Wisper.entitlements SafariExtension/Info.plist SafariExtension/SafariAgent.entitlements
+	@ruby -rjson -e 'JSON.parse(File.read("SafariExtension/Resources/manifest.json"))'
 	@set -e; for script in $(SHELL_SCRIPTS); do bash -n "$$script"; done
 	@ruby -e 'require "yaml"; ARGV.each { |file| YAML.load_file(file) }' $(YAML_FILES)
 

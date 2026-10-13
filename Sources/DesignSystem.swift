@@ -57,18 +57,26 @@ extension View {
         in shape: some Shape,
         tint: Color? = nil
     ) -> some View {
+        // Glass needs the macOS 26 SDK (Swift 6.2); older toolchains such as
+        // the CI's Xcode 16 build the fallback only.
+        #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             self.glassEffect(Self.nativeGlass(tint: tint), in: shape)
         } else {
             self
         }
+        #else
+        self
+        #endif
     }
 
+    #if compiler(>=6.2)
     @available(macOS 26.0, *)
     private static func nativeGlass(tint: Color?) -> Glass {
         guard let tint else { return .regular }
         return .regular.tint(tint)
     }
+    #endif
 }
 
 // MARK: - Glass Chips

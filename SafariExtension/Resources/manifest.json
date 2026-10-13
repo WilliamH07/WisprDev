@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Wisper Agent",
+  "description": "Posez vos questions sur la page web sans la quitter : appuyez deux fois sur Ctrl.",
+  "version": "0.1.0",
+  "icons": {
+    "48": "images/icon-48.png",
+    "96": "images/icon-96.png",
+    "128": "images/icon-128.png"
+  },
+  "background": {
+    "scripts": ["agent-core.js", "background.js"],
+    "persistent": false
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["agent-core.js", "content.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Wisper Agent",
+    "default_icon": {
+      "48": "images/icon-48.png",
+      "96": "images/icon-96.png"
+    }
+  },
+  "permissions": ["storage"],
+  "host_permissions": ["http://127.0.0.1/*"]
+}

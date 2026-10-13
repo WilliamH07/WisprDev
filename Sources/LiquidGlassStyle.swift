@@ -185,17 +185,25 @@ public struct LiquidGlassPillBackground: View {
                         Capsule()
                             .stroke(Color.white.opacity(0.15), lineWidth: 1)
                     )
-            } else if #available(macOS 26.0, *) {
-                // Native Liquid Glass surface. Content stays OUT of the glass:
-                // anything drawn inside gets refracted, so the glass is a plain
-                // tinted material and all UI renders crisply above it.
-                Color.clear
-                    .glassEffect(
-                        .regular.tint(Color(red: 0.08, green: 0.09, blue: 0.13).opacity(0.55)),
-                        in: Capsule()
-                    )
             } else {
+                // Glass needs the macOS 26 SDK (Swift 6.2); older toolchains
+                // such as the CI's Xcode 16 build the legacy body only.
+                #if compiler(>=6.2)
+                if #available(macOS 26.0, *) {
+                    // Native Liquid Glass surface. Content stays OUT of the glass:
+                    // anything drawn inside gets refracted, so the glass is a plain
+                    // tinted material and all UI renders crisply above it.
+                    Color.clear
+                        .glassEffect(
+                            .regular.tint(Color(red: 0.08, green: 0.09, blue: 0.13).opacity(0.55)),
+                            in: Capsule()
+                        )
+                } else {
+                    legacyGlassBody
+                }
+                #else
                 legacyGlassBody
+                #endif
             }
         }
     }
@@ -274,6 +282,7 @@ public struct LiquidGlassWindowBackground: View {
 
     public var body: some View {
         Group {
+            #if compiler(>=6.2)
             if #available(macOS 26.0, *) {
                 // Native Liquid Glass surface; content above it stays crisp.
                 Color.clear
@@ -286,6 +295,9 @@ public struct LiquidGlassWindowBackground: View {
             } else {
                 legacyWindowBody
             }
+            #else
+            legacyWindowBody
+            #endif
         }
     }
 
