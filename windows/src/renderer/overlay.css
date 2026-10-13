@@ -1,0 +1,26 @@
+:root {
+  --panneau: #fbfaf7; --encre: #18181a; --signal: #ee4b2b; --border: rgba(24, 24, 26, 0.14);
+}
+@media (prefers-color-scheme: dark) {
+  :root { --panneau: #1c1c1a; --encre: #f3f2ee; --border: rgba(255, 255, 255, 0.14); }
+}
+html, body { margin: 0; background: transparent; overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; }
+body { display: flex; align-items: flex-end; justify-content: center; height: 100vh; padding-bottom: 6px; }
+.pill {
+  display: inline-flex; align-items: center; gap: 10px; padding: 9px 16px; border-radius: 999px;
+  background: var(--panneau); color: var(--encre); border: 1px solid var(--border);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18); font-size: 13px; font-weight: 600;
+  transition: opacity 160ms ease-out, transform 160ms ease-out;
+}
+.pill.hidden { opacity: 0; transform: translateY(6px); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--encre); opacity: 0.4; }
+.pill.recording .dot { background: var(--signal); opacity: 1; animation: pulse 2.4s ease-out infinite; }
+.pill.working .dot { background: var(--signal); opacity: 1; }
+.pill.success .dot { background: #2f9e44; opacity: 1; }
+.pill.error .dot { background: var(--signal); opacity: 1; }
+.pill.error { border-color: var(--signal); }
+.meter { display: none; align-items: flex-end; gap: 2px; height: 14px; }
+.pill.recording .meter { display: inline-flex; }
+.meter i { width: 3px; height: 4px; background: var(--encre); border-radius: 2px; opacity: 0.7; transition: height 60ms linear; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(238, 75, 43, 0.45); } 70%, 100% { box-shadow: 0 0 0 10px rgba(238, 75, 43, 0); } }
+@media (prefers-reduced-motion: reduce) { .pill.recording .dot { animation: none; } .pill { transition: none; } }

@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:">
+  <title>Wisper</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand"><span id="liveDot" class="dot"></span><span>Wisper</span></div>
+    <nav>
+      <button class="nav active" data-view="home">Accueil</button>
+      <button class="nav" data-view="history">Historique</button>
+      <button class="nav" data-view="settings">Réglages</button>
+    </nav>
+  </aside>
+
+  <main>
+    <section id="view-home" class="view">
+      <div class="eyebrow" id="stateLabel">Accueil</div>
+      <div class="hero" id="heroWords">0</div>
+      <p class="muted" id="heroSub">mots dictés pour l'instant.</p>
+
+      <div class="tiles" id="tiles"></div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="label">Mots par jour</div>
+            <div class="mono readout" id="chartReadout"></div>
+          </div>
+          <div class="segmented" id="rangeSeg">
+            <button data-days="14">14 j</button><button data-days="30" class="on">30 j</button><button data-days="90">90 j</button>
+          </div>
+        </div>
+        <div id="chart" class="chart"></div>
+        <div class="source">Source : compteurs locaux de ce PC</div>
+      </div>
+
+      <div class="card">
+        <div class="label">Dernière dictée — du relâchement au texte prêt</div>
+        <div id="latency" class="muted">Faites une dictée pour voir où part le temps.</div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div class="label">Vitesse de la transcription</div>
+          <button class="pill action" id="benchTranscribe">Tester</button>
+        </div>
+        <div id="benchTranscribeOut" class="muted">Envoie un court clip synthétique (aucune de vos paroles) au moteur configuré.</div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div class="label">Vitesse et régularité de la réécriture IA</div>
+          <button class="pill action" id="benchCleanup">Tester</button>
+        </div>
+        <div id="benchCleanupOut" class="muted">Envoie 6 fois une phrase de test inventée à chaque modèle : un bon modèle est rapide ET régulier.</div>
+      </div>
+
+      <div class="footer"><span class="muted small">Compteurs stockés sur ce PC. Aucun texte dicté n'y est conservé.</span><button class="pill" id="resetStats">Réinitialiser</button></div>
+    </section>
+
+    <section id="view-history" class="view" hidden>
+      <div class="card-head"><h1>Historique</h1><button class="pill" id="clearHistory">Tout effacer</button></div>
+      <p class="muted">Les 20 dernières dictées, stockées uniquement sur ce PC. Désactivable dans les réglages.</p>
+      <div id="historyList"></div>
+    </section>
+
+    <section id="view-settings" class="view" hidden>
+      <h1>Réglages</h1>
+
+      <div class="card">
+        <div class="label">Clé API</div>
+        <label>Clé OpenRouter <span class="muted small" id="keyState"></span></label>
+        <div class="row"><input type="password" id="openRouterKey" placeholder="sk-or-…" autocomplete="off"><button class="pill" id="clearKey">Effacer</button></div>
+        <p class="muted small">Chiffrée avec la protection de données de Windows. Utilisée pour la transcription (Fish Audio) et la réécriture.</p>
+      </div>
+
+      <div class="card">
+        <div class="label">Raccourcis</div>
+        <div id="hotkeyRows"></div>
+        <p class="muted small">Maintenez le raccourci pour dicter, relâchez pour coller. Les touches Windows ne peuvent pas être capturées avec Fn : utilisez Ctrl, Alt, Maj, Win et une lettre.</p>
+      </div>
+
+      <div class="card">
+        <div class="label">Modèles</div>
+        <label>Transcription</label><input id="transcriptionModel">
+        <label>Langue de la transcription (optionnel, ex. fr)</label><input id="transcriptionLanguage" placeholder="détection automatique">
+        <label>Réécriture : modèle principal</label><input id="cleanupModel">
+        <label>Réécriture : modèle de secours (lancé en parallèle si le principal tarde)</label><input id="cleanupFallbackModel">
+        <label>Délai avant le modèle de secours (ms)</label><input id="hedgeDelayMs" type="number" min="200" max="10000" step="100">
+      </div>
+
+      <div class="card">
+        <div class="label">Vitesse</div>
+        <label class="check"><input type="checkbox" id="chunkedEnabled"> Transcrire pendant que je parle (par phrases)</label>
+        <label class="check"><input type="checkbox" id="fastPathEnabled"> Dictée rapide : phrases courtes sans nettoyage IA</label>
+        <label>Seuil : <span class="mono" id="fastPathLabel"></span> mots</label><input type="range" id="fastPathMaxWords" min="3" max="40" step="1">
+      </div>
+
+      <div class="card">
+        <div class="label">Texte</div>
+        <label>Langue de sortie (optionnel, ex. English)</label><input id="outputLanguage">
+        <label>Vocabulaire personnalisé (un mot par ligne)</label><textarea id="vocabulary" rows="3"></textarea>
+        <label>Macros vocales (une par ligne : déclencheur =&gt; texte)</label><textarea id="macros" rows="3" placeholder="mon adresse => 1 rue de Test"></textarea>
+        <label>Prompt de nettoyage personnalisé (optionnel)</label><textarea id="customPrompt" rows="4"></textarea>
+      </div>
+
+      <div class="card">
+        <div class="label">Application</div>
+        <label class="check"><input type="checkbox" id="keepHistory"> Conserver l'historique des dictées sur ce PC</label>
+        <label class="check"><input type="checkbox" id="restoreClipboard"> Restaurer le presse-papiers après le collage</label>
+        <label class="check"><input type="checkbox" id="launchAtLogin"> Lancer Wisper au démarrage de Windows</label>
+      </div>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
